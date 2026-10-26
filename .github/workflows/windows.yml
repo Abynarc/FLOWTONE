@@ -1,0 +1,98 @@
+name: Windows VST3 installer
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, windows-vst3]
+    paths: ['Source/**', 'CMakeLists.txt', 'packaging/**', '.github/checks/**', 'docs/INSTALL-WINDOWS.md', '.github/workflows/windows.yml']
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Fetch pinned JUCE
+        shell: pwsh
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/juce-framework/JUCE.git ../JUCE
+          if ($LASTEXITCODE) { throw 'JUCE clone failed' }
+          git -C ../JUCE checkout 454fe891acc8204f99f4ef1e3a28c84b1a4da145
+          if ($LASTEXITCODE) { throw 'JUCE checkout failed' }
+      - name: Build x64 VST3 and installer
+        shell: pwsh
+        run: ./packaging/build_windows.ps1 -WithChecks
+      - name: Verify processor and both analysis sources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m pip install numpy==2.5.4 scipy==1.18.1 soundfile==0.14.0
+          if ($LASTEXITCODE) { throw 'Verification dependencies failed' }
+          $env:FLOWTONE_VERIFY_DRIVER = (Resolve-Path 'build-windows/FLOWTONE_verify_artefacts/Release/FLOWTONE-verify.exe').Path
+          python .github/checks/ci_fixtures.py
+          if ($LASTEXITCODE) { throw 'Fixture generation failed' }
+          python .github/checks/checks.py 2>&1 | Tee-Object "$env:RUNNER_TEMP/processor.log"
+          if ($LASTEXITCODE) { throw 'Processor checks failed' }
+          python .github/checks/file-analysis-checks.py 2>&1 | Tee-Object "$env:RUNNER_TEMP/file-analysis.log"
+          if ($LASTEXITCODE) { throw 'File analysis checks failed' }
+          & $env:FLOWTONE_VERIFY_DRIVER retained-stream (Resolve-Path '.github/checks/fixtures/music-9-1-124.wav').Path
+          if ($LASTEXITCODE) { throw 'Windows retained source stream failed' }
+          & $env:FLOWTONE_VERIFY_DRIVER file-analyse (Resolve-Path '.github/checks/fixtures/music-9-1-124.wav').Path "$env:RUNNER_TEMP/flowtone-windows.png"
+          if ($LASTEXITCODE) { throw 'Editor screenshot failed' }
+      - name: Install, verify, upgrade and validate VST3
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = (Get-ChildItem dist/*-Setup.exe).FullName
+          $bundle = 'C:\Program Files\Common Files\VST3\FLOWTONE.vst3'
+          $source = (Resolve-Path build-windows/FLOWTONE_artefacts/Release/VST3/FLOWTONE.vst3).Path
+          function Check-Exit($process, $label) {
+            if ($process.ExitCode -ne 0) { throw "$label failed: $($process.ExitCode)" }
+          }
+          Check-Exit (Start-Process $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/LOG=$env:RUNNER_TEMP/install.log" -PassThru -Wait) 'Install'
+          Get-ChildItem $source -Recurse -File | ForEach-Object {
+            $relative = $_.FullName.Substring($source.Length + 1)
+            if ((Get-FileHash $_.FullName).Hash -ne (Get-FileHash (Join-Path $bundle $relative)).Hash) { throw "Installed hash mismatch: $relative" }
+          }
+          Check-Exit (Start-Process $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/LOG=$env:RUNNER_TEMP/upgrade.log" -PassThru -Wait) 'Upgrade'
+          $backup = Get-ChildItem 'C:\ProgramData\FLOWMINNERS\FLOWTONE\Backups' -Recurse -Directory -Filter FLOWTONE.vst3 | Sort-Object FullName -Descending | Select-Object -First 1
+          if (!$backup) { throw 'Missing upgrade backup' }
+          Get-ChildItem $source -Recurse -File | ForEach-Object {
+            $relative = $_.FullName.Substring($source.Length + 1)
+            if ((Get-FileHash $_.FullName).Hash -ne (Get-FileHash (Join-Path $backup.FullName $relative)).Hash) { throw "Backup mismatch: $relative" }
+          }
+          Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip -OutFile "$env:RUNNER_TEMP/pluginval.zip"
+          if ((Get-FileHash "$env:RUNNER_TEMP/pluginval.zip").Hash.ToLowerInvariant() -ne 'c08e61ce3b96db41636f8ec7e76f4c7e2c13ebdac7fa1b5a1f52b4f32ec715ab') { throw 'Validator checksum mismatch' }
+          Expand-Archive "$env:RUNNER_TEMP/pluginval.zip" "$env:RUNNER_TEMP/pluginval"
+          $validator = (Get-ChildItem "$env:RUNNER_TEMP/pluginval" -Recurse -Filter pluginval.exe | Select-Object -First 1).FullName
+          Check-Exit (Start-Process $validator -ArgumentList '--validate-in-process','--strictness-level','5','--output-dir',"$env:RUNNER_TEMP/validation",'--validate',"`"$bundle`"" -PassThru -Wait) 'VST3 validation'
+          Check-Exit (Start-Process 'C:\Program Files\FLOWMINNERS\FLOWTONE\unins000.exe' -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -PassThru -Wait) 'Uninstall'
+          if (Test-Path "$bundle/Contents/x86_64-win/FLOWTONE.vst3") { throw 'VST3 was not uninstalled' }
+          if (!(Test-Path 'C:\ProgramData\FLOWMINNERS\FLOWTONE\Backups')) { throw 'Uninstaller removed backups' }
+      - name: Windows diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-diagnostics
+          path: |
+            ${{ runner.temp }}/flowtone-windows.png
+            ${{ runner.temp }}/validation
+            ${{ runner.temp }}/processor.log
+            ${{ runner.temp }}/file-analysis.log
+            ${{ runner.temp }}/install.log
+            ${{ runner.temp }}/upgrade.log
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Installer for distribution
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: FLOWTONE-Windows-x64
+          path: |
+            dist/*-Setup.exe
+            dist/*-Windows-x64-VST3.zip
+            dist/*-Windows-Install-RU.txt
+            dist/SHA256SUMS-Windows.txt
+          if-no-files-found: error

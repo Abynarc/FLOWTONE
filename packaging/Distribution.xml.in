@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+  <title>FLOWTONE @VERSION@</title>
+  <welcome file="welcome.html" mime-type="text/html"/>
+  <conclusion file="conclusion.html" mime-type="text/html"/>
+  <options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+  <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+  <volume-check script="true"><allowed-os-versions><os-version min="12.0"/></allowed-os-versions></volume-check>
+  <choices-outline><line choice="flowtone"/></choices-outline>
+  <choice id="flowtone" title="FLOWTONE Audio Unit" visible="false"><pkg-ref id="com.flowminners.flowtone.pkg"/></choice>
+  <pkg-ref id="com.flowminners.flowtone.pkg" version="@VERSION@" onConclusion="None">FLOWTONE-AU.pkg</pkg-ref>
+  <pkg-ref id="com.flowminners.flowtone.pkg"><must-close><app id="com.apple.logic10"/><app id="com.apple.mobilelogic"/></must-close></pkg-ref>
+</installer-gui-script>

@@ -1,0 +1,71 @@
+cmake_minimum_required(VERSION 3.24)
+if(APPLE)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS")
+endif()
+project(FLOWTONE VERSION 0.3.0 LANGUAGES C CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(NOT DEFINED JUCE_PATH)
+  set(JUCE_PATH "${CMAKE_CURRENT_LIST_DIR}/../JUCE")
+endif()
+if(NOT EXISTS "${JUCE_PATH}/CMakeLists.txt")
+  message(FATAL_ERROR "JUCE not found. Pass -DJUCE_PATH=/absolute/path/to/JUCE")
+endif()
+if(MSVC)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  add_compile_options(/utf-8 /permissive- /Zc:lambda /Zc:__cplusplus)
+endif()
+if(APPLE)
+  set(FLOWTONE_FORMATS AU)
+elseif(WIN32)
+  set(FLOWTONE_FORMATS VST3)
+else()
+  message(FATAL_ERROR "Supported platforms: macOS and Windows")
+endif()
+option(FLOWTONE_USE_ACCELERATE "Use Apple Accelerate FFT on macOS" ${APPLE})
+option(FLOWTONE_BUILD_VERIFICATION "Build private processor verification driver" OFF)
+add_subdirectory("${JUCE_PATH}" "${CMAKE_CURRENT_BINARY_DIR}/JUCE" EXCLUDE_FROM_ALL)
+juce_add_plugin(FLOWTONE
+  COMPANY_NAME "FLOWMINNERS"
+  BUNDLE_ID "com.flowminners.flowtone"
+  PLUGIN_MANUFACTURER_CODE Flmn
+  PLUGIN_CODE Fltn
+  FORMATS ${FLOWTONE_FORMATS}
+  VST3_CATEGORIES Fx "Pitch Shift" Analyzer
+  PRODUCT_NAME "FLOWTONE"
+  IS_SYNTH FALSE
+  NEEDS_MIDI_INPUT FALSE
+  NEEDS_MIDI_OUTPUT FALSE
+  EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+  COPY_PLUGIN_AFTER_BUILD FALSE)
+juce_generate_juce_header(FLOWTONE)
+target_sources(FLOWTONE PRIVATE Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/PitchEngine.cpp Source/TrackAnalysis.cpp Source/FileAnalysis.cpp)
+target_include_directories(FLOWTONE PRIVATE third_party/stretch third_party/linear)
+target_compile_definitions(FLOWTONE PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 DONT_SET_USING_JUCE_NAMESPACE=1)
+if(APPLE)
+  target_sources(FLOWTONE PRIVATE Source/NativeRegionDrop_mac.mm)
+  if(FLOWTONE_USE_ACCELERATE)
+    find_library(FLOWTONE_ACCELERATE Accelerate REQUIRED)
+    target_compile_definitions(FLOWTONE PRIVATE SIGNALSMITH_USE_ACCELERATE=1)
+    target_link_libraries(FLOWTONE PRIVATE ${FLOWTONE_ACCELERATE})
+  endif()
+else()
+  target_sources(FLOWTONE PRIVATE Source/NativeRegionDrop_win.cpp)
+  target_compile_definitions(FLOWTONE PUBLIC JUCE_VST3_CAN_REPLACE_VST2=0 _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+endif()
+target_link_libraries(FLOWTONE PRIVATE juce::juce_audio_utils juce::juce_dsp
+  PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+if(FLOWTONE_BUILD_VERIFICATION)
+  set(FLOWTONE_CHECKS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/verification")
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.github/checks/driver.cpp")
+    set(FLOWTONE_CHECKS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.github/checks")
+  endif()
+  if(NOT EXISTS "${FLOWTONE_CHECKS_DIR}/driver.cpp")
+    message(FATAL_ERROR "Private verification sources not present in this checkout")
+  endif()
+  juce_add_console_app(FLOWTONE_verify PRODUCT_NAME "FLOWTONE-verify")
+  set_target_properties(FLOWTONE_verify PROPERTIES OUTPUT_NAME "FLOWTONE-verify")
+  target_sources(FLOWTONE_verify PRIVATE "${FLOWTONE_CHECKS_DIR}/driver.cpp")
+  target_include_directories(FLOWTONE_verify PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/FLOWTONE_artefacts/JuceLibraryCode")
+  target_link_libraries(FLOWTONE_verify PRIVATE FLOWTONE juce::juce_audio_utils juce::juce_dsp)
+endif()

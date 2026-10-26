@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+. "$(dirname -- "$0")/common.sh"
+# This script only copies the old system AU; Installer performs the actual replacement.
+if [ -e "$FLOWTONE_COMPONENT" ] || [ -L "$FLOWTONE_COMPONENT" ]; then
+    if [ -L "$FLOWTONE_COMPONENT" ] || [ ! -d "$FLOWTONE_COMPONENT" ]; then
+        echo 'FLOWTONE: путь системного плагина не является обычным пакетом .component.' >&2
+        exit 1
+    fi
+    FLOWTONE_BACKUP=$(backup_directory)
+    /usr/bin/ditto "$FLOWTONE_COMPONENT" "$FLOWTONE_BACKUP/FLOWTONE.component"
+    /usr/bin/diff -qr "$FLOWTONE_COMPONENT" "$FLOWTONE_BACKUP/FLOWTONE.component"
+    echo "FLOWTONE: резервная копия системного AU: $FLOWTONE_BACKUP"
+fi

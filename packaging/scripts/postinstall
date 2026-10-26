@@ -1,0 +1,28 @@
+#!/bin/sh
+set -eu
+. "$(dirname -- "$0")/common.sh"
+/usr/bin/codesign --verify --deep --strict "$FLOWTONE_COMPONENT"
+(cd "$FLOWTONE_COMPONENT" && /usr/bin/shasum -a 256 -c "$FLOWTONE_SCRIPT_DIR/component.sha256")
+# A previous per-user AU shadows the new system AU. Preserve it outside the scan folder.
+if console_home; then
+    FLOWTONE_PERSONAL="$FLOWTONE_ROOT$FLOWTONE_USER_HOME/Library/Audio/Plug-Ins/Components/FLOWTONE.component"
+    if [ -e "$FLOWTONE_PERSONAL" ] || [ -L "$FLOWTONE_PERSONAL" ]; then
+        if [ -L "$FLOWTONE_PERSONAL" ] || [ ! -d "$FLOWTONE_PERSONAL" ]; then
+            echo 'FLOWTONE: пользовательская копия является ссылкой или необычным файлом; она сохранена на месте.' >&2
+            exit 1
+        fi
+        FLOWTONE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$FLOWTONE_PERSONAL/Contents/Info.plist")
+        if [ "$FLOWTONE_ID" != 'com.flowminners.flowtone' ]; then
+            echo 'FLOWTONE: пользовательская копия имеет другой идентификатор; она сохранена на месте.' >&2
+            exit 1
+        fi
+        FLOWTONE_BACKUP=$(backup_directory)
+        /bin/mkdir "$FLOWTONE_BACKUP/Previous-user-copy"
+        /bin/mv "$FLOWTONE_PERSONAL" "$FLOWTONE_BACKUP/Previous-user-copy/FLOWTONE.component"
+        echo "FLOWTONE: прежняя пользовательская копия сохранена: $FLOWTONE_BACKUP/Previous-user-copy"
+    fi
+    if [ "$FLOWTONE_VOLUME" = '/' ]; then
+        /usr/bin/killall -u "$FLOWTONE_CONSOLE_USER" AudioComponentRegistrar 2>/dev/null || true
+    fi
+fi
+echo 'FLOWTONE установлен и проверен. Откройте Logic Pro заново.'
