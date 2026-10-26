@@ -1,15 +1,24 @@
 name: Windows VST3 installer
 on:
   workflow_dispatch:
+    inputs:
+      reuse_run:
+        description: 'Reuse a build from this run (verification/packaging changes only)'
+        required: false
+        default: ''
   push:
     branches: [main, windows-vst3]
     paths: ['Source/**', 'CMakeLists.txt', 'packaging/**', '.github/checks/**', 'docs/INSTALL-WINDOWS.md', '.github/workflows/windows.yml']
 permissions:
   contents: read
+  actions: read
 jobs:
   windows:
     runs-on: windows-2022
     timeout-minutes: 40
+    env:
+      PYTHONUTF8: '1'
+      REUSE_RUN: ${{ inputs.reuse_run || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -22,9 +31,45 @@ jobs:
           if ($LASTEXITCODE) { throw 'JUCE clone failed' }
           git -C ../JUCE checkout 454fe891acc8204f99f4ef1e3a28c84b1a4da145
           if ($LASTEXITCODE) { throw 'JUCE checkout failed' }
+      - name: Reuse compiled build
+        if: inputs.reuse_run != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:REUSE_RUN -notmatch '^\d+$') { throw 'Invalid build run ID' }
+          $old = gh run view $env:REUSE_RUN --repo $env:GITHUB_REPOSITORY --json headSha --jq .headSha
+          if ($LASTEXITCODE) { throw 'Cannot inspect source run' }
+          git fetch origin $old --depth=1
+          if ($LASTEXITCODE) { throw 'Cannot fetch source commit' }
+          git diff --quiet $old HEAD -- Source CMakeLists.txt third_party
+          if ($LASTEXITCODE) { throw 'Compiled sources changed; a fresh build is required' }
+          gh run download $env:REUSE_RUN --repo $env:GITHUB_REPOSITORY --name windows-build --dir .
+          if ($LASTEXITCODE) { throw 'Cannot download compiled build' }
+          Get-Content dist/SHA256SUMS-Windows.txt | ForEach-Object {
+            $parts = $_ -split '  ', 2
+            if ($parts.Count -ne 2 -or (Get-FileHash (Join-Path dist $parts[1])).Hash.ToLowerInvariant() -ne $parts[0]) { throw 'Build artifact hash mismatch' }
+          }
+          New-Item -ItemType Directory -Force build-windows/FLOWTONE_artefacts/Release/VST3 | Out-Null
+          Expand-Archive (Get-ChildItem dist/*-Windows-x64-VST3.zip).FullName build-windows/FLOWTONE_artefacts/Release/VST3 -Force
       - name: Build x64 VST3 and installer
         shell: pwsh
-        run: ./packaging/build_windows.ps1 -WithChecks
+        run: |
+          if ($env:REUSE_RUN) { ./packaging/build_windows.ps1 -SkipBuild }
+          else { ./packaging/build_windows.ps1 -WithChecks }
+      - name: Keep compiled build for validation retries
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: windows-build
+          path: |
+            dist/*-Setup.exe
+            dist/*-Windows-x64-VST3.zip
+            dist/*-Windows-Install-RU.txt
+            dist/SHA256SUMS-Windows.txt
+            build-windows/FLOWTONE_verify_artefacts/Release/*.exe
+          retention-days: 7
+          if-no-files-found: error
       - name: Verify processor and both analysis sources
         shell: pwsh
         run: |
@@ -40,6 +85,8 @@ jobs:
           if ($LASTEXITCODE) { throw 'File analysis checks failed' }
           & $env:FLOWTONE_VERIFY_DRIVER retained-stream (Resolve-Path '.github/checks/fixtures/music-9-1-124.wav').Path
           if ($LASTEXITCODE) { throw 'Windows retained source stream failed' }
+          & $env:FLOWTONE_VERIFY_DRIVER lifecycle-stress
+          if ($LASTEXITCODE) { throw 'Worker lifecycle stress failed' }
           & $env:FLOWTONE_VERIFY_DRIVER file-analyse (Resolve-Path '.github/checks/fixtures/music-9-1-124.wav').Path "$env:RUNNER_TEMP/flowtone-windows.png"
           if ($LASTEXITCODE) { throw 'Editor screenshot failed' }
       - name: Install, verify, upgrade and validate VST3

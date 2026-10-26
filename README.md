@@ -6,8 +6,8 @@ BPM, тональность и изменение высоты звука. Ру�
 
 | Система | Формат | Скачать |
 |---|---|---|
-| macOS 12+ · Apple Silicon и Intel | AU · Logic Pro | [Установщик PKG](https://github.com/Abynarc/FLOWTONE/releases/download/macos-v0.3.0/FLOWTONE-0.3.0-macOS-Universal-AU.pkg) |
-| Windows 10/11 · x64 | VST3 · FL Studio и другие VST3-хосты | [Установщик EXE](https://github.com/Abynarc/FLOWTONE/releases/download/windows-v0.3.0/FLOWTONE-0.3.0-Windows-x64-Setup.exe) |
+| macOS 12+ · Apple Silicon и Intel | AU · Logic Pro | [Установщик PKG](https://github.com/Abynarc/FLOWTONE/releases/download/macos-v0.3.1/FLOWTONE-0.3.1-macOS-Universal-AU.pkg) |
+| Windows 10/11 · x64 | VST3 · FL Studio и другие VST3-хосты | [Установщик EXE](https://github.com/Abynarc/FLOWTONE/releases/download/windows-v0.3.1/FLOWTONE-0.3.1-Windows-x64-Setup.exe) |
 
 - **Файл:** перетащи аудио — анализ всей записи без воспроизведения.
 - **Онлайн:** анализ входа дорожки при проигрывании проекта.

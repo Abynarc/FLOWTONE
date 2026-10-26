@@ -26,6 +26,7 @@ try {
     $Licenses = New-Item -ItemType Directory -Force (Join-Path $Plugin "Contents/Resources/Licenses")
     Copy-Item third_party/stretch/LICENSE.txt (Join-Path $Licenses.FullName "Signalsmith-Stretch-MIT.txt") -Force
     Copy-Item third_party/linear/LICENSE.txt (Join-Path $Licenses.FullName "Signalsmith-Linear-MIT.txt") -Force
+    Copy-Item third_party/vst3/LICENSE.txt (Join-Path $Licenses.FullName "Steinberg-VST3-MIT.txt") -Force
     Copy-Item THIRD_PARTY.md (Join-Path $Licenses.FullName "THIRD_PARTY.md") -Force
     $Binary = Join-Path $Plugin "Contents/x86_64-win/FLOWTONE.vst3"
     if (!(Test-Path $Binary -PathType Leaf)) { throw "Missing x64 VST3 binary" }

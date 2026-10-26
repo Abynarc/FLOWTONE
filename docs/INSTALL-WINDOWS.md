@@ -1,13 +1,13 @@
-FLOWTONE 0.3.0 · FLOWMINNERS · Windows VST3
+FLOWTONE 0.3.1 · FLOWMINNERS · Windows VST3
 
 УСТАНОВКА
 1. Сохраните проекты и закройте FL Studio и другие секвенсоры.
-2. Запустите FLOWTONE-0.3.0-Windows-x64-Setup.exe.
+2. Запустите FLOWTONE-0.3.1-Windows-x64-Setup.exe.
 3. В FL Studio: Options → Manage plugins → Find installed plugins.
    Добавьте FLOWTONE как эффект на нужный канал микшера.
    В другом VST3-секвенсоре обновите список плагинов.
 
-Windows 10/11 x64, 64-разрядный VST3-секвенсор.
+Windows 10 (1607+)/11 x64, 64-разрядный VST3-секвенсор.
 Стандартная папка: C:\Program Files\Common Files\VST3\FLOWTONE.vst3
 Поддержка конкретной версии секвенсора требует проверки в ней. Это VST3,
 не VST2/CLAP/AAX. Плагин не работает в хостах, которые не поддерживают VST3.

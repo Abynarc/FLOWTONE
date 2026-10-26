@@ -24,7 +24,11 @@ FileAnalysis::FileAnalysis(std::function<void()> changed):stateChanged(std::move
 FileAnalysis::~FileAnalysis(){stop();}
 void FileAnalysis::stop()
 {
-    exiting.store(true);revision.fetch_add(1);ready.notify_one();
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        exiting.store(true);revision.fetch_add(1);
+    }
+    ready.notify_one();
     if(worker.joinable())worker.join();
 }
 void FileAnalysis::load(const juce::File& file,std::shared_ptr<void> lease,std::shared_ptr<juce::InputStream> stream)

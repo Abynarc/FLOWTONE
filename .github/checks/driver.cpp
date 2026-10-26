@@ -47,6 +47,11 @@ int main(int argc,char** argv)
 {
     try{
         juce::ScopedJuceInitialiser_GUI gui;require(argc>=2,"mode required");const juce::String mode=argv[1];
+        if(mode=="lifecycle-stress")
+        {
+            for(int i=0;i<10000;++i){flowtone::FileAnalysis worker;}
+            std::cout<<"10000 immediate worker creation/destruction cycles PASS\n";return 0;
+        }
         if(mode=="retained-stream")
         {
             require(argc>=3,"input file required");

@@ -6,7 +6,7 @@ from scipy.signal import periodogram
 root=Path(__file__).resolve().parent;fixtures=root/'fixtures';out=root/'rendered';out.mkdir(exist_ok=True)
 records=[]
 def driver(*args):
- result=subprocess.run([os.environ.get('FLOWTONE_VERIFY_DRIVER',str(root/'driver')),*map(str,args)],capture_output=True,text=True)
+ result=subprocess.run([os.environ.get('FLOWTONE_VERIFY_DRIVER',str(root/'driver')),*map(str,args)],capture_output=True,text=True,encoding="utf-8")
  if result.returncode:raise AssertionError(result.stdout+result.stderr)
  return result.stdout.strip()
 def frequency(data,rate,start=.7,end=2.4):
