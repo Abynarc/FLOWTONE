@@ -8,6 +8,7 @@ struct AnalysisSnapshot
     int key = -1;
     bool minor = false, complete = false;
     double bpm = 0.0, seconds = 0.0;
+    uint64_t droppedSamples = 0;
     std::array<double,12> pitchClasses {}, bassPitchClasses {};
 };
 class TrackAnalysis

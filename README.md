@@ -1,19 +1,25 @@
 # FLOWTONE
 
-BPM, тональность и изменение высоты звука. Русский интерфейс, названия тональностей — на английском.
+Определяет BPM и тональность, меняет высоту звука без изменения темпа. AU для macOS и VST3 для Windows.
 
-![Интерфейс FLOWTONE](docs/images/flowtone.png)
+![FLOWTONE](docs/images/flowtone.png)
 
-| Система | Формат | Скачать |
+- Анализ всего аудиофайла без воспроизведения или онлайн-анализ входа дорожки.
+- Сдвиг от −12 до +12 полутонов с шагом ¼ тона — 50 центов.
+- Сохранение тембра, два режима качества и регулировка громкости.
+- A/B, пресеты и сравнение «До / После». Настройки и результат анализа файла сохраняются в проекте.
+
+## Скачать и установить
+
+| Система | Формат | Установщик |
 |---|---|---|
-| macOS 12+ · Apple Silicon и Intel | AU · Logic Pro | [Установщик PKG](https://github.com/Abynarc/FLOWTONE/releases/download/macos-v0.3.1/FLOWTONE-0.3.1-macOS-Universal-AU.pkg) |
-| Windows 10/11 · x64 | VST3 · FL Studio и другие VST3-хосты | [Установщик EXE](https://github.com/Abynarc/FLOWTONE/releases/download/windows-v0.3.1/FLOWTONE-0.3.1-Windows-x64-Setup.exe) |
+| macOS 12+ · Apple Silicon и Intel | AU | [Скачать PKG](https://github.com/Abynarc/FLOWTONE/releases/download/macos-v0.3.2/FLOWTONE-0.3.2-Universal.pkg) |
+| Windows 10/11 · x64 | VST3 | [Скачать EXE](https://github.com/Abynarc/FLOWTONE/releases/download/windows-v0.3.2/FLOWTONE-0.3.2-Windows-x64-Setup.exe) |
 
-- **Файл:** перетащи аудио — анализ всей записи без воспроизведения.
-- **Онлайн:** анализ входа дорожки при проигрывании проекта.
-- Сдвиг **−12…+12 полутонов**, шаг **¼ тона / 50 центов**; темп сохраняется.
-- Сохранение тембра, два качества, A/B и «До / После».
+Закройте секвенсор и запустите установщик. В Logic: **Audio FX → Audio Units → FLOWMINNERS → FLOWTONE**. В FL Studio: **Manage plugins → Find installed plugins**.
 
-Закрой секвенсор перед установкой. В Logic: **Audio FX → Audio Units → FLOWMINNERS → FLOWTONE**. В FL Studio: **Manage plugins → Find installed plugins**.
+Для анализа перетащите файл на осциллограмму или выберите **«Онлайн»** и включите воспроизведение. Регулятор сдвига меняет звук дорожки, включая экспорт проекта; загруженный файл служит только для анализа.
 
-[Все релизы](https://github.com/Abynarc/FLOWTONE/releases) · [Сборка Windows](docs/BUILD-WINDOWS.md) · [Зависимости](THIRD_PARTY.md)
+Установщики пока без сертификата издателя.
+
+[Все релизы](https://github.com/Abynarc/FLOWTONE/releases) · [Установка Windows](docs/INSTALL-WINDOWS.md)

@@ -51,6 +51,11 @@ def main():
     shutil.copy2(ROOT / 'third_party/stretch/LICENSE.txt', licenses / 'Signalsmith-Stretch-MIT.txt')
     shutil.copy2(ROOT / 'third_party/linear/LICENSE.txt', licenses / 'Signalsmith-Linear-MIT.txt')
     shutil.copy2(ROOT / 'THIRD_PARTY.md', licenses / 'THIRD_PARTY.md')
+    licenses = source / 'Contents/Resources/Licenses'
+    licenses.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / 'LICENSE', licenses / 'FLOWMINNERS-MIT.txt')
+    shutil.copy2(ROOT / 'third_party/vst3/LICENSE.txt', licenses / 'Steinberg-VST3-MIT.txt')
+    shutil.copy2(ROOT / 'THIRD_PARTY.md', licenses / 'THIRD_PARTY.md')
     run(['codesign', '--force' , '--sign', '-', '--timestamp=none', source])
     run(['codesign', '--verify', '--deep', '--strict', source])
     component_hashes = hashes(source)

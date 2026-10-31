@@ -9,3 +9,7 @@ Signalsmith Linear 0.6.6, commit 7bb1c8f36794d6980080ce817c91f8da8fe56a66, https
 Тексты лицензий Signalsmith включаются также в Contents/Resources/Licenses установленного AU/VST3. Аудиоматериал и исходники сторонних тестовых корпусов в плагин и установщик не включаются. Windows-установщик собирается Inno Setup 6.3+; среда сборки и средства проверки не включаются в установленный плагин.
 
 VST 3 SDK, Steinberg Media Technologies GmbH, MIT, из закреплённого JUCE. Текст лицензии сохранён в third_party/vst3/LICENSE.txt и включается в Windows VST3.
+
+## Лицензия авторского кода
+
+Авторский код FLOWMINNERS распространяется по MIT (см. LICENSE). Эта лицензия не изменяет условия JUCE, Signalsmith, VST3 SDK и других зависимостей. JUCE используется на условиях JUCE 9 EULA либо AGPLv3; MIT не предоставляет отдельного разрешения на JUCE. Условия: https://juce.com/legal/juce-9-licence/.

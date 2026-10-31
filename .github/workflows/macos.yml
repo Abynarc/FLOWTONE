@@ -1,0 +1,35 @@
+name: macOS regression
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['Source/**', 'CMakeLists.txt', '.github/checks/**', '.github/workflows/macos.yml']
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Fetch pinned JUCE
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/juce-framework/JUCE.git ../JUCE
+          git -C ../JUCE checkout 454fe891acc8204f99f4ef1e3a28c84b1a4da145
+      - name: Build actual processor verification
+        run: |
+          cmake -S . -B build-ci -DCMAKE_BUILD_TYPE=Release -DFLOWTONE_BUILD_VERIFICATION=ON
+          cmake --build build-ci --target FLOWTONE_verify --parallel 4
+      - name: Run regression
+        run: |
+          python -m pip install -r .github/checks/requirements.txt
+          export FLOWTONE_VERIFY_DRIVER="$GITHUB_WORKSPACE/build-ci/FLOWTONE_verify_artefacts/Release/FLOWTONE-verify"
+          python .github/checks/ci_fixtures.py
+          "$FLOWTONE_VERIFY_DRIVER" contract
+          "$FLOWTONE_VERIFY_DRIVER" overflow
+          python .github/checks/checks.py
+          python .github/checks/file-analysis-checks.py
+          "$FLOWTONE_VERIFY_DRIVER" lifecycle-stress

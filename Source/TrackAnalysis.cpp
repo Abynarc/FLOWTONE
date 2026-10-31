@@ -46,7 +46,7 @@ struct TrackAnalysis::Impl
     std::array<double, 12> chroma {}, bassChroma {};
     std::vector<double> onsets, bassOnsets;
     int cursor = 0, untilHop = hop;
-    uint64_t total = 0;
+    uint64_t total = 0, lastPublished = 0;
     int tonalFrames = 0;
     double signalEnergy = 0;
     bool offline = false;
@@ -60,7 +60,7 @@ struct TrackAnalysis::Impl
     void clearAnalysis()
     {
         samples.fill(0); previous.fill(0); chroma.fill(0); bassChroma.fill(0); onsets.clear();bassOnsets.clear();
-        cursor = 0; untilHop = hop; total = 0; tonalFrames = 0; signalEnergy = 0;
+        cursor = 0; untilHop = hop; total = 0; lastPublished = 0; tonalFrames = 0; signalEnergy = 0;
         const std::lock_guard<std::mutex> lock(mutex); result = {};
     }
     void analyseFrame()
@@ -193,7 +193,8 @@ struct TrackAnalysis::Impl
     {
         if(workingRevision!=revision.load())return;
         AnalysisSnapshot next;
-        next.seconds = total/rate;
+        next.seconds = total/rate; next.droppedSamples = dropped.load();
+        lastPublished = total;
         next.bpm = tempo();next.pitchClasses=chroma;next.bassPitchClasses=bassChroma;
         if (next.seconds >= (offline ? 4 : 12) && tonalFrames >= 30)
         {
@@ -250,7 +251,7 @@ struct TrackAnalysis::Impl
                 }
             };
             consume(a,na); consume(b,nb); fifo.finishedRead(na+nb);
-            if(na+nb>0 && fifo.getNumReady()==0)publish();
+            if(na+nb>0 && fifo.getNumReady()==0 && total-lastPublished>=static_cast<uint64_t>(rate*0.5))publish();
             if (na+nb==0) std::this_thread::sleep_for(std::chrono::milliseconds(3));
         }
     }
@@ -322,12 +323,12 @@ void TrackAnalysis::prepare(double sourceRate)
 {
     stop(); auto& p=*impl;
     p.sourceRate=sourceRate; p.rate=juce::jmin(12000.0,sourceRate); p.phase=0; p.sum=0; p.sumCount=0; p.lp1=p.lp2=0;
-    p.fifo.reset(); p.exiting.store(false); p.producerRevision=p.revision.load();
+    p.fifo.reset(); p.dropped.store(0); p.exiting.store(false); p.producerRevision=p.revision.load();
     p.worker=std::thread([&p]{p.run();});
 }
 void TrackAnalysis::stop()
 { impl->exiting.store(true); if(impl->worker.joinable()) impl->worker.join(); }
-void TrackAnalysis::requestReset() { impl->revision.fetch_add(1);const std::lock_guard<std::mutex> lock(impl->mutex);impl->result={}; }
+void TrackAnalysis::requestReset() { impl->revision.fetch_add(1);impl->dropped.store(0);const std::lock_guard<std::mutex> lock(impl->mutex);impl->result={}; }
 int TrackAnalysis::pendingSamples() const { return impl->fifo.getNumReady(); }
 void TrackAnalysis::push(const juce::AudioBuffer<float>& buffer)
 {
@@ -338,20 +339,33 @@ void TrackAnalysis::push(const juce::AudioBuffer<float>& buffer)
     if(buffer.getNumChannels()>1 && buffer.getMagnitude(1,0,buffer.getNumSamples()) > buffer.getMagnitude(0,0,buffer.getNumSamples())*1.4f) channel=1;
     const auto* input=buffer.getReadPointer(channel);
     const double alpha=1-std::exp(-2*pi*juce::jmin(3000.0,p.sourceRate*0.3)/p.sourceRate);
+    std::array<float,512> batch {};
+    int count=0;
+    auto enqueue=[&]
+    {
+        if(count==0)return;
+        int a=0,na=0,b=0,nb=0;p.fifo.prepareToWrite(count,a,na,b,nb);
+        std::copy_n(batch.data(),na,p.queued.data()+a);
+        std::copy_n(batch.data()+na,nb,p.queued.data()+b);
+        p.fifo.finishedWrite(na+nb);
+        if(na+nb<count)p.dropped.fetch_add(static_cast<unsigned>(count-na-nb));
+        count=0;
+    };
     for(int i=0;i<buffer.getNumSamples();++i)
     {
         const double sample=std::isfinite(input[i]) ? input[i] : 0;
         p.lp1+=alpha*(sample-p.lp1);p.lp2+=alpha*(p.lp1-p.lp2);p.sum+=p.lp2;++p.sumCount;p.phase+=p.rate;
         if(p.phase>=p.sourceRate)
         {
-            p.phase-=p.sourceRate; int a=0,na=0,b=0,nb=0;p.fifo.prepareToWrite(1,a,na,b,nb);
-            if(na>0){p.queued[static_cast<size_t>(a)]=static_cast<float>(p.sum/p.sumCount);p.fifo.finishedWrite(1);}else p.dropped.fetch_add(1);
+            p.phase-=p.sourceRate;batch[static_cast<size_t>(count++)]=static_cast<float>(p.sum/p.sumCount);
             p.sum=0;p.sumCount=0;
+            if(count==static_cast<int>(batch.size()))enqueue();
         }
     }
+    enqueue();
 }
 AnalysisSnapshot TrackAnalysis::snapshot() const
-{ const std::lock_guard<std::mutex> lock(impl->mutex); return impl->result; }
+{ const std::lock_guard<std::mutex> lock(impl->mutex); auto result=impl->result;result.droppedSamples=impl->dropped.load();return result; }
 juce::String TrackAnalysis::keyName(int key,bool minor)
 {
     if(key<0) return {};

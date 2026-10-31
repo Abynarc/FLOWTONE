@@ -9,7 +9,9 @@ struct PitchEngine::Impl
     std::array<signalsmith::stretch::SignalsmithStretch<float>, 2> stretch;
     juce::AudioBuffer<float> input, wet[2], dryDelay, wetDelay[2];
     juce::SmoothedValue<float> pitch, quality, mix, gain;
-    std::array<int, 2> engineLatency {}, delayPosition {};
+    std::array<int, 2> engineLatency {}, delayPosition {}, warmRemaining {};
+    std::array<bool, 2> running {};
+    int warmupSamples = 0;
     int channels = 0, commonLatency = 0, dryPosition = 0;
     double rate = 48000.0;
     bool primed = false;
@@ -29,6 +31,7 @@ void PitchEngine::prepare(double sampleRate, int channels)
         p.stretch[static_cast<size_t>(i)].setFormantBase(static_cast<float>(180.0 / sampleRate));
     }
     p.commonLatency = juce::jmax(p.engineLatency[0], p.engineLatency[1]);
+    p.warmupSamples = p.commonLatency + highBlock;
     p.input.setSize(channels, Impl::quantum);
     p.dryDelay.setSize(channels, p.commonLatency + 1);
     for (int i = 0; i < 2; ++i)
@@ -45,7 +48,7 @@ void PitchEngine::reset()
     auto& p = *impl;
     for (auto& s : p.stretch) s.reset();
     p.dryDelay.clear(); for (auto& d : p.wetDelay) d.clear();
-    p.dryPosition = 0; p.delayPosition = {}; p.primed = false;
+    p.dryPosition = 0; p.delayPosition = {}; p.running = {}; p.warmRemaining = {}; p.primed = false;
 }
 int PitchEngine::latency() const { return impl->commonLatency; }
 void PitchEngine::process(juce::AudioBuffer<float>& buffer, float semitones, bool formants,
@@ -59,10 +62,10 @@ void PitchEngine::process(juce::AudioBuffer<float>& buffer, float semitones, boo
     if (!p.primed)
     {
         p.pitch.setCurrentAndTargetValue(targetPitch); p.mix.setCurrentAndTargetValue(targetMix);
-        p.gain.setCurrentAndTargetValue(targetGain); p.quality.setCurrentAndTargetValue(highQuality ? 1.0f : 0.0f); p.primed = true;
+        p.gain.setCurrentAndTargetValue(targetGain); p.quality.setCurrentAndTargetValue(highQuality ? 1.0f : 0.0f); p.running[highQuality ? 1u : 0u] = true; p.primed = true;
     }
     p.pitch.setTargetValue(targetPitch); p.mix.setTargetValue(targetMix);
-    p.gain.setTargetValue(targetGain); p.quality.setTargetValue(highQuality ? 1.0f : 0.0f);
+    p.gain.setTargetValue(targetGain);
     for (int offset = 0; offset < buffer.getNumSamples(); offset += Impl::quantum)
     {
         const int count = juce::jmin(Impl::quantum, buffer.getNumSamples() - offset);
@@ -73,13 +76,34 @@ void PitchEngine::process(juce::AudioBuffer<float>& buffer, float semitones, boo
                 p.input.setSample(c, n, std::isfinite(sample) ? sample : 0.0f);
             }
         const auto currentPitch = p.pitch.skip(count);
+        const int wanted = highQuality ? 1 : 0;
         for (int i = 0; i < 2; ++i)
         {
-            auto& s = p.stretch[static_cast<size_t>(i)];
+            const auto index = static_cast<size_t>(i);
+            const float q = p.quality.getCurrentValue();
+            const bool contributes = i == 0 ? q < 1.0f : q > 0.0f;
+            if (i != wanted && !contributes)
+            {
+                p.running[index] = false;
+                p.wet[i].clear();
+                continue;
+            }
+            auto& s = p.stretch[index];
+            if (!p.running[index])
+            {
+                s.reset(); p.wetDelay[i].clear(); p.delayPosition[index] = 0;
+                p.warmRemaining[index] = p.warmupSamples;
+                p.running[index] = true;
+            }
             s.setTransposeSemitones(currentPitch);
             s.setFormantFactor(1.0f, formants);
             s.process(p.input.getArrayOfReadPointers(), count, p.wet[i].getArrayOfWritePointers(), count);
+            p.warmRemaining[index] = juce::jmax(0, p.warmRemaining[index] - count);
         }
+        // Keep the current engine audible until the requested one has valid
+        // history. Only the transition runs both; host latency stays constant.
+        if (p.warmRemaining[static_cast<size_t>(wanted)] == 0)
+            p.quality.setTargetValue(highQuality ? 1.0f : 0.0f);
         for (int n = 0; n < count; ++n)
         {
             const float q = p.quality.getNextValue(), mix = p.mix.getNextValue(), gain = p.gain.getNextValue();
