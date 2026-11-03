@@ -20,3 +20,7 @@ macOS: `cmake -S . -B build-ci -DCMAKE_BUILD_TYPE=Release -DFLOWTONE_BUILD_VERIF
 Локальный прогон macOS: 42/42 допустимых BPM в обоих режимах, 4/4 неритмичных сигналов без ложного BPM. На тех же 42 записях файловый анализ 0.3.2 дал 35/42, Essentia Multifeature — 40/42. Это сравнение синтетических записей, а не оценка точности на произвольной музыке. Старые 31 результат тональности совпали с прежней версией.
 
 Многопризнаковый движок реализован на C++; Essentia использовалась только для независимого сравнения и не включена в плагин. Источник подхода: [BeatTrackerMultiFeature](https://essentia.upf.edu/reference/std_BeatTrackerMultiFeature.html).
+
+Проверки исходников 0.3.3 на GitHub: [macOS](https://github.com/Abynarc/FLOWTONE/actions/runs/41583624480) и [Windows](https://github.com/Abynarc/FLOWTONE/actions/runs/41583624431). Windows workflow также проверяет установку, обновление, резервную копию, удаление и VST3 через pluginval с уровнем строгости 5.
+
+На Windows и macOS в указанных CI-прогонах подтверждены 42/42 допустимых BPM в обоих режимах и 4/4 неритмичных сигнала без ложного BPM. Установка/обновление/удаление и pluginval уровня 5 на Windows также завершились успешно.
