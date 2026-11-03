@@ -46,6 +46,8 @@ try {
     $Dist = (New-Item -ItemType Directory -Force dist).FullName
     $Doc = Join-Path $Dist "FLOWTONE-$Version-Windows-Install-RU.txt"
     Copy-Item docs/INSTALL-WINDOWS.md $Doc -Force
+    $EnglishDoc = Join-Path $Dist "FLOWTONE-$Version-Windows-Install-EN.txt"
+    Copy-Item docs/INSTALL-WINDOWS-EN.md $EnglishDoc -Force
     $Manifest = Join-Path (Resolve-Path $BuildDir) "installer-manifest.iss"
     $Lines = [System.Collections.Generic.List[string]]::new()
     $Lines.Add('procedure VerifyPayload;')
@@ -62,12 +64,12 @@ try {
     $Compiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
     $CompilerPath = if ($Compiler) { $Compiler.Source } else { "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
     if (!(Test-Path $CompilerPath)) { throw "Install Inno Setup 6.3+ to build the installer" }
-    & $CompilerPath "/DPluginVersion=$Version" "/DPluginDir=$Plugin" "/DDistDir=$Dist" "/DDocPath=$Doc" "/DManifestInclude=$Manifest" packaging/windows/FLOWTONE.iss
+    & $CompilerPath "/DPluginVersion=$Version" "/DPluginDir=$Plugin" "/DDistDir=$Dist" "/DDocPath=$Doc" "/DEnglishDocPath=$EnglishDoc" "/DManifestInclude=$Manifest" packaging/windows/FLOWTONE.iss
     if ($LASTEXITCODE) { throw "Installer compilation failed" }
     $Setup = Join-Path $Dist "FLOWTONE-$Version-Windows-x64-Setup.exe"
     $Portable = Join-Path $Dist "FLOWTONE-$Version-Windows-x64-VST3.zip"
     Compress-Archive -Path $Plugin -DestinationPath $Portable -Force
-    $Checksums = @($Setup, $Portable, $Doc) | ForEach-Object {
+    $Checksums = @($Setup, $Portable, $Doc, $EnglishDoc) | ForEach-Object {
         "{0}  {1}" -f (Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant(), (Split-Path $_ -Leaf)
     }
     [IO.File]::WriteAllLines((Join-Path $Dist "SHA256SUMS-Windows.txt"), $Checksums, [Text.UTF8Encoding]::new($false))

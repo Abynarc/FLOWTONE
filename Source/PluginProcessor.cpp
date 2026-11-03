@@ -87,17 +87,17 @@ void FLOWTONEAudioProcessor::selectProfile(int profile)
 }
 juce::String FLOWTONEAudioProcessor::resultKey() const
 {
-    const auto result=analysisSnapshot();if(result.key<0)return ru(u8"Недостаточно данных");
+    const auto result=analysisSnapshot();if(result.key<0)return uiText(u8"Недостаточно данных");
     const float shift=value("after")>0.5f && value("bypass")<0.5f ? value("shift") : 0;
     const int whole=static_cast<int>(shift),cents=juce::roundToInt((shift-whole)*100);
     auto name=flowtone::TrackAnalysis::keyName((result.key+whole+120)%12,result.minor);
-    if(cents!=0)name+=(cents>0?" +":" ")+juce::String(cents)+ru(u8" центов");
+    if(cents!=0)name+=(cents>0?" +":" ")+juce::String(cents)+uiText(u8" центов");
     return name;
 }
 void FLOWTONEAudioProcessor::getStateInformation(juce::MemoryBlock& block)
 {
     const std::lock_guard<std::recursive_mutex> lock(stateMutex);
-    auto state=parameters.copyState();state.setProperty("version",2,nullptr);state.setProperty("profile",currentProfile.load(),nullptr);state.setProperty("fileSource",fileSource.load(),nullptr);
+    auto state=parameters.copyState();state.setProperty("uiLanguage",englishUI.load()?"en":"ru",nullptr);state.setProperty("version",2,nullptr);state.setProperty("profile",currentProfile.load(),nullptr);state.setProperty("fileSource",fileSource.load(),nullptr);
     // APVTS may contain custom children restored from an older project. Replace,
     // rather than append, the cached file analysis on every state save.
     for(auto old=state.getChildWithName("FILE_ANALYSIS");old.isValid();old=state.getChildWithName("FILE_ANALYSIS"))state.removeChild(old,nullptr);
@@ -160,6 +160,7 @@ void FLOWTONEAudioProcessor::setStateInformation(const void* data,int bytes)
     currentProfile=juce::jlimit(0,1,static_cast<int>(state.getProperty("profile",0)));
     for(int p=0;p<2;++p)for(int i=0;i<4;++i){const auto v=static_cast<float>(state.getProperty("profile"+juce::String(p)+"value"+juce::String(i),i==1||i==2?1:0));profiles[static_cast<size_t>(p)][static_cast<size_t>(i)]=std::isfinite(v)?v:0;}
     for(auto old=state.getChildWithName("FILE_ANALYSIS");old.isValid();old=state.getChildWithName("FILE_ANALYSIS"))state.removeChild(old,nullptr);
+    englishUI.store(state.getProperty("uiLanguage","ru").toString()=="en");
     parameters.replaceState(state);fileAnalysis.restore(std::move(cached));fileSource.store(static_cast<bool>(state.getProperty("fileSource",false)));resetRequested.store(true);analysis.requestReset();
 }
 juce::AudioProcessorEditor* FLOWTONEAudioProcessor::createEditor(){return new FLOWTONEAudioProcessorEditor(*this);}

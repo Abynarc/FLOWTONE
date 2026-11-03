@@ -1,4 +1,5 @@
 #pragma once
+#include "Localisation.h"
 #include <JuceHeader.h>
 #include "PitchEngine.h"
 #include "TrackAnalysis.h"
@@ -31,6 +32,14 @@ public:
     void setStateInformation(const void*,int) override;
     juce::AudioProcessorParameter* getBypassParameter() const override { return parameters.getParameter("bypass"); }
 
+    flowui::Language uiLanguage() const { return englishUI.load() ? flowui::Language::english : flowui::Language::russian; }
+    void setUiLanguage(flowui::Language language)
+    {
+        if (englishUI.exchange(language == flowui::Language::english) != (language == flowui::Language::english))
+            updateHostDisplay(ChangeDetails().withNonParameterStateChanged(true));
+    }
+    juce::String uiText(const char* value) const { return flowui::text(juce::String::fromUTF8(value), uiLanguage()); }
+    juce::String uiMessage(const juce::String& value) const { return flowui::message(value, uiLanguage()); }
     juce::AudioProcessorValueTreeState parameters;
     float value(const char* id) const { return parameters.getRawParameterValue(id)->load(); }
     void setValue(const char* id,float value);
@@ -47,6 +56,7 @@ public:
     juce::String resultKey() const;
     void resetAnalysis();
 private:
+    std::atomic<bool> englishUI { false };
     static juce::AudioProcessorValueTreeState::ParameterLayout layout();
     void process(juce::AudioBuffer<float>&, bool forcedBypass);
     flowtone::PitchEngine engine;

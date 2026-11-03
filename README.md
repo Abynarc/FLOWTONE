@@ -2,6 +2,8 @@
 
 Определяет BPM и тональность, меняет высоту звука без изменения темпа. AU для macOS и VST3 для Windows.
 
+Интерфейс **Русский / English**: переключатель **RU / EN** в верхней панели. Выбор сохраняется в проекте.
+
 ![FLOWTONE](docs/images/flowtone.png)
 
 - Анализ всего аудиофайла без воспроизведения или онлайн-анализ входа дорожки.
@@ -14,8 +16,8 @@
 
 | Система | Формат | Установщик |
 |---|---|---|
-| macOS 12+ · Apple Silicon и Intel | AU | [Скачать PKG](https://github.com/Abynarc/FLOWTONE/releases/download/macos-v0.3.3/FLOWTONE-0.3.3-Universal.pkg) |
-| Windows 10/11 · x64 | VST3 | [Скачать EXE](https://github.com/Abynarc/FLOWTONE/releases/download/windows-v0.3.3/FLOWTONE-0.3.3-Windows-x64-Setup.exe) |
+| macOS 12+ · Apple Silicon и Intel | AU | [Скачать PKG](https://github.com/Abynarc/FLOWTONE/releases/download/v0.4.0/FLOWTONE-0.4.0-Universal.pkg) |
+| Windows 10/11 · x64 | VST3 | [Скачать EXE](https://github.com/Abynarc/FLOWTONE/releases/download/v0.4.0/FLOWTONE-0.4.0-Windows-x64-Setup.exe) |
 
 Закройте секвенсор и запустите установщик. В Logic: **Audio FX → Audio Units → FLOWMINNERS → FLOWTONE**. В FL Studio: **Manage plugins → Find installed plugins**.
 
@@ -24,3 +26,5 @@
 Установщики пока без сертификата издателя.
 
 [Все релизы](https://github.com/Abynarc/FLOWTONE/releases) · [Установка Windows](docs/INSTALL-WINDOWS.md)
+
+[English interface layout and terminology](docs/localisation/DESIGN.md) · [English Windows installation](docs/INSTALL-WINDOWS-EN.md)

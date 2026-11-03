@@ -65,36 +65,43 @@ jobs:
           path: |
             dist/*-Setup.exe
             dist/*-Windows-x64-VST3.zip
-            dist/*-Windows-Install-RU.txt
+            dist/*-Windows-Install-*.txt
             dist/SHA256SUMS-Windows.txt
             build-windows/FLOWTONE_verify_artefacts/Release/*.exe
           retention-days: 7
           if-no-files-found: error
-      - name: Verify processor and both analysis sources
+      - name: Verify Russian and English interfaces, processor and both analysis sources
         shell: pwsh
         run: |
+          python .github/checks/localisation_catalog.py --check
+          if ($LASTEXITCODE) { throw 'Catalog check failed' }
           $ErrorActionPreference = 'Stop'
           python -m pip install numpy==2.5.4 scipy==1.18.1 soundfile==0.14.0
           if ($LASTEXITCODE) { throw 'Verification dependencies failed' }
           $env:FLOWTONE_VERIFY_DRIVER = (Resolve-Path 'build-windows/FLOWTONE_verify_artefacts/Release/FLOWTONE-verify.exe').Path
           python .github/checks/ci_fixtures.py
           if ($LASTEXITCODE) { throw 'Fixture generation failed' }
-          python .github/checks/checks.py 2>&1 | Tee-Object "$env:RUNNER_TEMP/processor.log"
-          if ($LASTEXITCODE) { throw 'Processor checks failed' }
-          python .github/checks/file-analysis-checks.py 2>&1 | Tee-Object "$env:RUNNER_TEMP/file-analysis.log"
-          if ($LASTEXITCODE) { throw 'File analysis checks failed' }
-          python .github/checks/tempo_checks.py --output verification/tempo-v2 2>&1 | Tee-Object "$env:RUNNER_TEMP/tempo.log"
-          if ($LASTEXITCODE) { throw 'Tempo acceptance checks failed' }
-          & $env:FLOWTONE_VERIFY_DRIVER retained-stream (Resolve-Path '.github/checks/fixtures/music-9-1-124.wav').Path
-          if ($LASTEXITCODE) { throw 'Windows retained source stream failed' }
-          & $env:FLOWTONE_VERIFY_DRIVER contract
-          if ($LASTEXITCODE) { throw 'Callback contract failed' }
-          & $env:FLOWTONE_VERIFY_DRIVER overflow
-          if ($LASTEXITCODE) { throw 'Analysis overflow reporting failed' }
-          & $env:FLOWTONE_VERIFY_DRIVER lifecycle-stress
-          if ($LASTEXITCODE) { throw 'Worker lifecycle stress failed' }
-          & $env:FLOWTONE_VERIFY_DRIVER file-analyse (Resolve-Path '.github/checks/fixtures/music-9-1-124.wav').Path "$env:RUNNER_TEMP/flowtone-windows.png"
-          if ($LASTEXITCODE) { throw 'Editor screenshot failed' }
+          & $env:FLOWTONE_VERIFY_DRIVER localisation "$env:RUNNER_TEMP/ui-localisation"
+          if ($LASTEXITCODE) { throw 'UI localisation failed' }
+          foreach ($language in @('ru', 'en')) {
+            $env:FLOW_UI_TEST_LANGUAGE = $language
+            python .github/checks/checks.py 2>&1 | Tee-Object "$env:RUNNER_TEMP/processor.log"
+            if ($LASTEXITCODE) { throw 'Processor checks failed' }
+            python .github/checks/file-analysis-checks.py 2>&1 | Tee-Object "$env:RUNNER_TEMP/file-analysis.log"
+            if ($LASTEXITCODE) { throw 'File analysis checks failed' }
+            python .github/checks/tempo_checks.py --output verification/tempo-v2 2>&1 | Tee-Object "$env:RUNNER_TEMP/tempo.log"
+            if ($LASTEXITCODE) { throw 'Tempo acceptance checks failed' }
+            & $env:FLOWTONE_VERIFY_DRIVER retained-stream (Resolve-Path '.github/checks/fixtures/music-9-1-124.wav').Path
+            if ($LASTEXITCODE) { throw 'Windows retained source stream failed' }
+            & $env:FLOWTONE_VERIFY_DRIVER contract
+            if ($LASTEXITCODE) { throw 'Callback contract failed' }
+            & $env:FLOWTONE_VERIFY_DRIVER overflow
+            if ($LASTEXITCODE) { throw 'Analysis overflow reporting failed' }
+            & $env:FLOWTONE_VERIFY_DRIVER lifecycle-stress
+            if ($LASTEXITCODE) { throw 'Worker lifecycle stress failed' }
+            & $env:FLOWTONE_VERIFY_DRIVER file-analyse (Resolve-Path '.github/checks/fixtures/music-9-1-124.wav').Path "$env:RUNNER_TEMP/flowtone-windows.png"
+            if ($LASTEXITCODE) { throw 'Editor screenshot failed' }
+          }
       - name: Install, verify, upgrade and validate VST3
         shell: pwsh
         run: |
@@ -132,6 +139,7 @@ jobs:
           name: windows-diagnostics
           path: |
             ${{ runner.temp }}/flowtone-windows.png
+            ${{ runner.temp }}/ui-localisation
             ${{ runner.temp }}/validation
             ${{ runner.temp }}/processor.log
             ${{ runner.temp }}/file-analysis.log
@@ -148,6 +156,6 @@ jobs:
           path: |
             dist/*-Setup.exe
             dist/*-Windows-x64-VST3.zip
-            dist/*-Windows-Install-RU.txt
+            dist/*-Windows-Install-*.txt
             dist/SHA256SUMS-Windows.txt
           if-no-files-found: error

@@ -5,6 +5,7 @@
 class ToneLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
+    juce::Font getComboBoxFont(juce::ComboBox&) override;
     void drawButtonBackground(juce::Graphics&,juce::Button&,const juce::Colour&,bool,bool) override;
     void drawButtonText(juce::Graphics&,juce::TextButton&,bool,bool) override;
     void drawToggleButton(juce::Graphics&,juce::ToggleButton&,bool,bool) override;
@@ -20,6 +21,11 @@ public:
     bool isInterestedInFileDrag(const juce::StringArray&) override;
     void filesDropped(const juce::StringArray&,int,int) override;
 private:
+    juce::String decimal(double value, int places = 1) const
+    { auto result = juce::String(value, places); return processor.uiLanguage() == flowui::Language::english ? result : result.replace(".", ","); }
+    void refreshLanguage();
+    juce::String tr(const char* value) const { return processor.uiText(value); }
+    juce::ComboBox language;
     void timerCallback() override;
     void applyPreset(int);
     void showHelp();

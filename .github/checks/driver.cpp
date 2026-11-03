@@ -30,6 +30,8 @@ void* operator new[](std::size_t n){return ::operator new(n);}
 void operator delete(void* p) noexcept{std::free(p);}
 void operator delete[](void* p) noexcept{std::free(p);}
 static void require(bool value,const char* error){if(!value)throw std::runtime_error(error);}
+#include "localisation_checks.h"
+
 static double tempoError(double actual,double expected)
 {return std::min({std::abs(actual-expected),std::abs(actual*2-expected),std::abs(actual*0.5-expected)});}
 static void load(const juce::File& f,juce::AudioBuffer<float>& audio,double& rate)
@@ -49,6 +51,11 @@ int main(int argc,char** argv)
 {
     try{
         juce::ScopedJuceInitialiser_GUI gui;require(argc>=2,"mode required");const juce::String mode=argv[1];
+        if(mode=="localisation")
+        {
+            require(argc >= 3, "output folder required");const auto folder = juce::File(argv[2]);folder.createDirectory();
+            localisationChecks<FLOWTONEAudioProcessor>(folder);return 0;
+        }
         if(mode=="lifecycle-stress")
         {
             for(int i=0;i<10000;++i){flowtone::FileAnalysis worker;}
@@ -59,7 +66,7 @@ int main(int argc,char** argv)
             require(argc>=3,"input file required");
             const auto file=juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("FLOWTONE-stream-"+juce::Uuid().toString()+".wav");
             require(juce::File(argv[2]).copyFileTo(file),"temporary source copy");
-            FLOWTONEAudioProcessor p;
+            FLOWTONEAudioProcessor p;p.setUiLanguage(testLanguage());
            #if JUCE_WINDOWS
             auto editor=std::make_unique<FLOWTONEAudioProcessorEditor>(p);
             editor->filesDropped({file.getFullPathName()},0,0);editor.reset();
@@ -97,7 +104,7 @@ int main(int argc,char** argv)
                 void audioProcessorChanged(juce::AudioProcessor* p,const ChangeDetails& details)override
                 {if(details.nonParameterStateChanged){juce::MemoryBlock state;p->getStateInformation(state);++notifications;}}
             } listener;
-            FLOWTONEAudioProcessor processor;
+            FLOWTONEAudioProcessor processor;processor.setUiLanguage(testLanguage());
             processor.addListener(&listener);
             auto wait=[&]
             {
@@ -119,8 +126,16 @@ int main(int argc,char** argv)
             require(listener.notifications.load()>=2,"host not notified of completed file state");
             require(file.available&&file.error.isEmpty(),file.error.toRawUTF8());require(processor.usesFileAnalysis(),"file source not selected");
             require(processor.analysis.snapshot().seconds==0,"file analysis unexpectedly requires live audio");
+            if (mode == "file-lifecycle")
+            {
+                auto editor = std::unique_ptr<juce::AudioProcessorEditor>(processor.createEditor());
+                toggleLanguageRoundTrip(*editor, processor);
+                const auto retained = processor.fileAnalysis.snapshot();
+                require(processor.usesFileAnalysis() && retained.available && retained.result.bpm == file.result.bpm
+                    && retained.result.key == file.result.key && retained.name == file.name, "Language switch reset file analysis");
+            }
             processor.setValue("shift",.5f);juce::MemoryBlock state;processor.getStateInformation(state);
-            FLOWTONEAudioProcessor restored;restored.setStateInformation(state.getData(),static_cast<int>(state.getSize()));
+            FLOWTONEAudioProcessor restored;restored.setUiLanguage(testLanguage());restored.setStateInformation(state.getData(),static_cast<int>(state.getSize()));
             auto saved=restored.fileAnalysis.snapshot();require(restored.usesFileAnalysis()&&saved.available&&!saved.busy,"cached state unavailable");
             require(std::abs(saved.result.bpm-file.result.bpm)<1e-6&&saved.result.key==file.result.key&&saved.name==file.name,"cached result mismatch");
             require(std::abs(saved.result.tempoConfidence-file.result.tempoConfidence)<1e-9&&saved.result.tempoStable==file.result.tempoStable&&saved.result.tempoAmbiguous==file.result.tempoAmbiguous&&saved.result.tempoVariable==file.result.tempoVariable,"cached tempo evidence mismatch");
@@ -138,7 +153,7 @@ int main(int argc,char** argv)
             {
                 juce::AudioBuffer<float> source;double rate;load(juce::File(argv[2]),source,rate);
                 processor.selectAnalysisSource(false);processor.setRateAndBufferSizeDetails(rate,256);processor.prepareToPlay(rate,256);
-                FLOWTONEAudioProcessor reference;reference.setRateAndBufferSizeDetails(rate,256);reference.prepareToPlay(rate,256);reference.setValue("shift",.5f);
+                FLOWTONEAudioProcessor reference;reference.setUiLanguage(testLanguage());reference.setRateAndBufferSizeDetails(rate,256);reference.prepareToPlay(rate,256);reference.setValue("shift",.5f);
                 juce::MidiBuffer midi;float difference=0;
                 for(int offset=0;offset<source.getNumSamples();offset+=256)
                 {
@@ -168,7 +183,7 @@ int main(int argc,char** argv)
                 auto legacy=juce::ValueTree::fromXml(*xml);auto cache=legacy.getChildWithName("FILE_ANALYSIS");
                 for(const auto* property:{"tempoConfidence","alternativeBpm","tempoStable","tempoAmbiguous","tempoVariable","beatTimes"})cache.removeProperty(property,nullptr);
                 juce::MemoryBlock oldState;juce::AudioProcessor::copyXmlToBinary(*legacy.createXml(),oldState);
-                FLOWTONEAudioProcessor old;old.setStateInformation(oldState.getData(),static_cast<int>(oldState.getSize()));
+                FLOWTONEAudioProcessor old;old.setUiLanguage(testLanguage());old.setStateInformation(oldState.getData(),static_cast<int>(oldState.getSize()));
                 const auto oldFile=old.fileAnalysis.snapshot();
                 require(oldFile.available&&std::abs(oldFile.result.bpm-file.result.bpm)<1e-9&&oldFile.result.tempoConfidence==0&&!oldFile.result.tempoStable&&oldFile.result.beatTimes.empty(),"legacy file cache compatibility");
                 for(int corrupt=0;corrupt<3;++corrupt)
@@ -178,7 +193,7 @@ int main(int argc,char** argv)
                     if(corrupt==1)data.setProperty("beatTimes","-1,0.5",nullptr);
                     if(corrupt==2)data.setProperty("beatTimes","1,0.5",nullptr);
                     juce::MemoryBlock bytes;juce::AudioProcessor::copyXmlToBinary(*broken.createXml(),bytes);
-                    FLOWTONEAudioProcessor target;target.setStateInformation(bytes.getData(),static_cast<int>(bytes.getSize()));
+                    FLOWTONEAudioProcessor target;target.setUiLanguage(testLanguage());target.setStateInformation(bytes.getData(),static_cast<int>(bytes.getSize()));
                     require(!target.usesFileAnalysis()&&!target.fileAnalysis.snapshot().available,"invalid tempo evidence accepted");
                 }
             }
@@ -214,7 +229,7 @@ int main(int argc,char** argv)
             while(analysis.pendingSamples()>0)juce::Thread::sleep(1);juce::Thread::sleep(10);const auto a=analysis.snapshot();
             std::cout<<"{\"bpm\":"<<a.bpm<<",\"confidence\":"<<a.tempoConfidence<<",\"stable\":"<<(a.tempoStable?"true":"false")<<",\"ambiguous\":"<<(a.tempoAmbiguous?"true":"false")<<",\"variable\":"<<(a.tempoVariable?"true":"false")<<",\"alternative\":"<<a.alternativeBpm<<",\"beats\":"<<a.beatTimes.size()<<",\"key\":"<<a.key<<",\"minor\":"<<(a.minor?"true":"false")<<",\"seconds\":"<<a.seconds<<",\"complete\":"<<(a.complete?"true":"false")<<",\"chroma\":[";for(int i=0;i<12;++i)std::cout<<(i?",":"")<<a.pitchClasses[static_cast<size_t>(i)];std::cout<<"],\"bass\":[";for(int i=0;i<12;++i)std::cout<<(i?",":"")<<a.bassPitchClasses[static_cast<size_t>(i)];std::cout<<"]}\n";analysis.stop();return 0;
         }
-        if(mode=="empty-shot"){FLOWTONEAudioProcessor p;shot(p,juce::File(argv[2]));return 0;}
+        if(mode=="empty-shot"){FLOWTONEAudioProcessor p;p.setUiLanguage(testLanguage());shot(p,juce::File(argv[2]));return 0;}
         if(mode=="overflow")
         {
             flowtone::TrackAnalysis analysis;analysis.prepare(48000);
@@ -232,7 +247,7 @@ int main(int argc,char** argv)
             for(const auto rate:{44100.0,48000.0,96000.0})
             for(const auto channels:{1,2})
             {
-                FLOWTONEAudioProcessor p;
+                FLOWTONEAudioProcessor p;p.setUiLanguage(testLanguage());
                 auto layout=p.getBusesLayout();
                 layout.inputBuses.set(0,juce::AudioChannelSet::canonicalChannelSet(channels));
                 layout.outputBuses.set(0,layout.inputBuses[0]);
@@ -281,10 +296,10 @@ int main(int argc,char** argv)
         }
         if(mode=="state")
         {
-            FLOWTONEAudioProcessor p;p.setValue("shift",2.5f);p.setValue("quality",0);p.setValue("gain",-3);p.selectProfile(1);p.setValue("shift",-4.5f);p.setValue("formants",0);juce::MemoryBlock state;p.getStateInformation(state);FLOWTONEAudioProcessor restored;restored.setStateInformation(state.getData(),static_cast<int>(state.getSize()));require(std::abs(restored.value("shift")+4.5f)<1e-4f&&restored.value("formants")==0&&restored.activeProfile()==1,"state current");restored.selectProfile(0);require(std::abs(restored.value("shift")-2.5f)<1e-4f&&restored.value("quality")==0&&std::abs(restored.value("gain")+3)<1e-4f,"state profile A");std::cout<<"State and A/B PASS\n";return 0;
+            FLOWTONEAudioProcessor p;p.setUiLanguage(testLanguage());p.setValue("shift",2.5f);p.setValue("quality",0);p.setValue("gain",-3);p.selectProfile(1);p.setValue("shift",-4.5f);p.setValue("formants",0);juce::MemoryBlock state;p.getStateInformation(state);FLOWTONEAudioProcessor restored;restored.setUiLanguage(testLanguage());restored.setStateInformation(state.getData(),static_cast<int>(state.getSize()));require(std::abs(restored.value("shift")+4.5f)<1e-4f&&restored.value("formants")==0&&restored.activeProfile()==1,"state current");restored.selectProfile(0);require(std::abs(restored.value("shift")-2.5f)<1e-4f&&restored.value("quality")==0&&std::abs(restored.value("gain")+3)<1e-4f,"state profile A");std::cout<<"State and A/B PASS\n";return 0;
         }
         require(mode=="render"&&argc>=7,"render arguments");juce::AudioBuffer<float> source;double rate;load(juce::File(argv[2]),source,rate);
-        FLOWTONEAudioProcessor p;auto layout=p.getBusesLayout();layout.inputBuses.set(0,juce::AudioChannelSet::canonicalChannelSet(source.getNumChannels()));layout.outputBuses.set(0,layout.inputBuses[0]);require(p.setBusesLayout(layout),"layout");
+        FLOWTONEAudioProcessor p;p.setUiLanguage(testLanguage());auto layout=p.getBusesLayout();layout.inputBuses.set(0,juce::AudioChannelSet::canonicalChannelSet(source.getNumChannels()));layout.outputBuses.set(0,layout.inputBuses[0]);require(p.setBusesLayout(layout),"layout");
         const int blockSize=std::getenv("FLOWTONE_TEST_BLOCK")?std::stoi(std::getenv("FLOWTONE_TEST_BLOCK")):256;
         p.setRateAndBufferSizeDetails(rate,blockSize);p.setNonRealtime(true);p.setValue("shift",std::stof(argv[4]));p.setValue("after",std::stof(argv[5]));p.setValue("formants",std::stof(argv[6]));if(argc>7)p.setValue("quality",std::stof(argv[7]));
         p.prepareToPlay(rate,blockSize);const int latency=p.getLatencySamples();juce::AudioBuffer<float> output(source.getNumChannels(),source.getNumSamples());output.clear();juce::MidiBuffer midi;

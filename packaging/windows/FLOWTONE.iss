@@ -31,6 +31,7 @@ russian.WelcomeLabel2=Установщик добавит FLOWTONE VST3 для 6
 [Files]
 Source: "{#PluginDir}\*"; DestDir: "{commoncf64}\VST3\FLOWTONE.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#DocPath}"; DestDir: "{app}"; DestName: "Установка.txt"; Flags: ignoreversion
+Source: "{#EnglishDocPath}"; DestDir: "{app}"; DestName: "Installation-EN.txt"; Flags: ignoreversion
 
 [Code]
 var
