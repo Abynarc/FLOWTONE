@@ -72,8 +72,7 @@ def main():
 3. Откройте Logic заново: Audio FX → Audio Units → FLOWMINNERS → FLOWTONE.
 
 Формат AU, Intel + Apple Silicon. Минимальная версия в сборке — macOS 12.
-Проверки выполнены на Apple Silicon с текущей macOS. Отдельная проверка на
-Intel и macOS 12 не выполнялась; совместимость версии Logic зависит от Apple.
+Требования версии Logic Pro учитываются отдельно.
 
 Плагин: /Library/Audio/Plug-Ins/Components/FLOWTONE.component
 Копии прежнего плагина: /Library/Application Support/FLOWMINNERS/FLOWTONE/Backups

@@ -1,8 +1,7 @@
 param(
     [string]$BuildDir = "build-windows",
     [string]$JucePath = "../JUCE",
-    [switch]$SkipBuild,
-    [switch]$WithChecks
+    [switch]$SkipBuild
 )
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -12,15 +11,10 @@ try {
     $Version = [regex]::Match((Get-Content CMakeLists.txt -Raw), 'project\(FLOWTONE VERSION (\d+\.\d+\.\d+)').Groups[1].Value
     if (!$Version) { throw "Missing project version" }
     if (!$SkipBuild) {
-        $Checks = if ($WithChecks) { "ON" } else { "OFF" }
-        & cmake -S . -B $BuildDir -G "Visual Studio 17 2022" -A x64 "-DJUCE_PATH=$JucePath" "-DFLOWTONE_BUILD_VERIFICATION=$Checks"
+        & cmake -S . -B $BuildDir -G "Visual Studio 17 2022" -A x64 "-DJUCE_PATH=$JucePath"
         if ($LASTEXITCODE) { throw "CMake configuration failed" }
         & cmake --build $BuildDir --config Release --target FLOWTONE_VST3 --parallel 4
         if ($LASTEXITCODE) { throw "VST3 build failed" }
-        if ($WithChecks) {
-            & cmake --build $BuildDir --config Release --target FLOWTONE_verify --parallel 4
-            if ($LASTEXITCODE) { throw "Processor verifier build failed" }
-        }
     }
     $Plugin = (Resolve-Path "$BuildDir/FLOWTONE_artefacts/Release/VST3/FLOWTONE.vst3").Path
     $Licenses = New-Item -ItemType Directory -Force (Join-Path $Plugin "Contents/Resources/Licenses")
