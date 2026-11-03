@@ -8,6 +8,9 @@ struct AnalysisSnapshot
     int key = -1;
     bool minor = false, complete = false;
     double bpm = 0.0, seconds = 0.0;
+    double tempoConfidence = 0, alternativeBpm = 0;
+    bool tempoStable = false, tempoAmbiguous = false, tempoVariable = false;
+    std::vector<double> beatTimes;
     uint64_t droppedSamples = 0;
     std::array<double,12> pitchClasses {}, bassPitchClasses {};
 };

@@ -83,6 +83,8 @@ jobs:
           if ($LASTEXITCODE) { throw 'Processor checks failed' }
           python .github/checks/file-analysis-checks.py 2>&1 | Tee-Object "$env:RUNNER_TEMP/file-analysis.log"
           if ($LASTEXITCODE) { throw 'File analysis checks failed' }
+          python .github/checks/tempo_checks.py --output verification/tempo-v2 2>&1 | Tee-Object "$env:RUNNER_TEMP/tempo.log"
+          if ($LASTEXITCODE) { throw 'Tempo acceptance checks failed' }
           & $env:FLOWTONE_VERIFY_DRIVER retained-stream (Resolve-Path '.github/checks/fixtures/music-9-1-124.wav').Path
           if ($LASTEXITCODE) { throw 'Windows retained source stream failed' }
           & $env:FLOWTONE_VERIFY_DRIVER contract
@@ -133,6 +135,8 @@ jobs:
             ${{ runner.temp }}/validation
             ${{ runner.temp }}/processor.log
             ${{ runner.temp }}/file-analysis.log
+            ${{ runner.temp }}/tempo.log
+            verification/tempo-v2/acceptance.json
             ${{ runner.temp }}/install.log
             ${{ runner.temp }}/upgrade.log
           if-no-files-found: ignore

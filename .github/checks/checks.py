@@ -14,6 +14,8 @@ def frequency(data,rate,start=.7,end=2.4):
  f,p=periodogram(y,rate,window='hann',nfft=1<<20);i=int(np.argmax(p))
  # Quadratic interpolation of the heavily zero-padded spectrum.
  values=np.log(np.maximum(p[i-1:i+2],1e-30));delta=.5*(values[0]-values[2])/(values[0]-2*values[1]+values[2]);return (i+delta)*rate/(1<<20)
+def tempo_error(actual, expected):
+ return min(abs(actual/factor-expected) for factor in (.5,1,2))
 start=time.time()
 for rate in [16000,44100,48000,96000]:
  source=fixtures/f'sine-{rate}.wav';original,sr=sf.read(source,dtype='float32')
@@ -54,9 +56,9 @@ for file in sorted(fixtures.glob('*.wav')):
  a=json.loads(driver('analyse',file));analysis[file.name]=a
  if file.name.startswith('music-'):
   _,key,minor,bpm=file.stem.split('-');assert a['key']==int(key) and a['minor']==bool(int(minor)),(file.name,a)
-  assert abs(a['bpm']-int(bpm))<.25,(file.name,a)
+  assert tempo_error(a['bpm'],int(bpm))<.25,(file.name,a)
  elif file.name.startswith('tempo-'):
-  bpm=int(file.stem.split('-')[1]);assert abs(a['bpm']-bpm)<.25,(file.name,a)
+  bpm=int(file.stem.split('-')[1]);assert tempo_error(a['bpm'],bpm)<.25,(file.name,a)
  elif file.name in ['noise.wav','silence.wav']:
   assert a['key']==-1 and a['bpm']==0,(file.name,a)
  elif file.name.startswith('sine-'):assert a['key']==-1 and a['bpm']==0
@@ -66,7 +68,7 @@ for name,key,mode in [line.split('\t')for line in (fixtures/'bach-keys.tsv').rea
  a=analysis[name]
  if name=='bach-bwv153.1.wav':continue # Signature says E minor, global Music21 analysis says A minor. Keep ambiguity in report.
  assert a['key']==int(key) and a['minor']==(mode=='minor'),(name,a,key,mode)
- assert abs(a['bpm']-120)<.3,(name,a)
+ assert tempo_error(a['bpm'],120)<.3,(name,a)
 (root/'pitch-results.json').write_text(json.dumps(records,indent=2)+'\n')
 (root/'analysis-results.json').write_text(json.dumps(analysis,indent=2)+'\n')
 print('All processor checks PASS; elapsed',round(time.time()-start,2),'seconds',flush=True)

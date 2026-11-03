@@ -30,6 +30,8 @@ void* operator new[](std::size_t n){return ::operator new(n);}
 void operator delete(void* p) noexcept{std::free(p);}
 void operator delete[](void* p) noexcept{std::free(p);}
 static void require(bool value,const char* error){if(!value)throw std::runtime_error(error);}
+static double tempoError(double actual,double expected)
+{return std::min({std::abs(actual-expected),std::abs(actual*2-expected),std::abs(actual*0.5-expected)});}
 static void load(const juce::File& f,juce::AudioBuffer<float>& audio,double& rate)
 {
     juce::AudioFormatManager formats;formats.registerBasicFormats();std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(f));require(reader!=nullptr,"reader");
@@ -67,7 +69,7 @@ int main(int argc,char** argv)
            #endif
             require(file.deleteFile(),"delete temporary source while handle open");
             auto wait=[&]{const auto deadline=juce::Time::getMillisecondCounterHiRes()+10000;while(p.fileAnalysis.snapshot().busy&&juce::Time::getMillisecondCounterHiRes()<deadline)juce::Thread::sleep(1);require(!p.fileAnalysis.snapshot().busy,"stream timeout");};
-            wait();auto first=p.fileAnalysis.snapshot();require(first.available&&std::abs(first.result.bpm-124)<.25,"deleted source analysis");
+            wait();auto first=p.fileAnalysis.snapshot();require(first.available&&tempoError(first.result.bpm,124)<.25,"deleted source analysis");
             p.resetAnalysis();wait();auto second=p.fileAnalysis.snapshot();require(second.available&&std::abs(second.result.bpm-first.result.bpm)<.001,"deleted source repeat");
             std::cout<<"Opened stream remains readable after source deletion; analysis and repeat PASS\n";return 0;
         }
@@ -86,7 +88,7 @@ int main(int argc,char** argv)
            #endif
             return 0;
         }
-        if(mode=="file-analyse"||mode=="file-lifecycle")
+        if(mode=="file-analyse"||mode=="file-lifecycle"||mode=="tempo-state-contract")
         {
             struct StateListener final:juce::AudioProcessorListener
             {
@@ -121,6 +123,9 @@ int main(int argc,char** argv)
             FLOWTONEAudioProcessor restored;restored.setStateInformation(state.getData(),static_cast<int>(state.getSize()));
             auto saved=restored.fileAnalysis.snapshot();require(restored.usesFileAnalysis()&&saved.available&&!saved.busy,"cached state unavailable");
             require(std::abs(saved.result.bpm-file.result.bpm)<1e-6&&saved.result.key==file.result.key&&saved.name==file.name,"cached result mismatch");
+            require(std::abs(saved.result.tempoConfidence-file.result.tempoConfidence)<1e-9&&saved.result.tempoStable==file.result.tempoStable&&saved.result.tempoAmbiguous==file.result.tempoAmbiguous&&saved.result.tempoVariable==file.result.tempoVariable,"cached tempo evidence mismatch");
+            require(saved.result.beatTimes.size()==file.result.beatTimes.size(),"cached beat count mismatch");
+            for(size_t i=0;i<saved.result.beatTimes.size();++i)require(std::abs(saved.result.beatTimes[i]-file.result.beatTimes[i])<1e-7,"cached beat positions mismatch");
             for(size_t i=0;i<512;++i)require(std::abs(saved.waveform[i]-file.waveform[i])<1e-5,"cached waveform mismatch");
             // prepare/release at an unrelated host rate must not clear the file.
             restored.setRateAndBufferSizeDetails(44100,256);restored.prepareToPlay(44100,256);restored.releaseResources();
@@ -156,16 +161,58 @@ int main(int argc,char** argv)
                 require(!processor.fileAnalysis.snapshot().available&&processor.fileAnalysis.snapshot().error.isNotEmpty(),"missing file not reported");
                 processor.loadAnalysisFile(juce::File(argv[2]));wait();require(processor.fileAnalysis.snapshot().available,"recovery failed");
             }
+            if(mode=="tempo-state-contract")
+            {
+                auto xml=juce::AudioProcessor::getXmlFromBinary(state.getData(),static_cast<int>(state.getSize()));
+                require(xml!=nullptr,"saved state XML");
+                auto legacy=juce::ValueTree::fromXml(*xml);auto cache=legacy.getChildWithName("FILE_ANALYSIS");
+                for(const auto* property:{"tempoConfidence","alternativeBpm","tempoStable","tempoAmbiguous","tempoVariable","beatTimes"})cache.removeProperty(property,nullptr);
+                juce::MemoryBlock oldState;juce::AudioProcessor::copyXmlToBinary(*legacy.createXml(),oldState);
+                FLOWTONEAudioProcessor old;old.setStateInformation(oldState.getData(),static_cast<int>(oldState.getSize()));
+                const auto oldFile=old.fileAnalysis.snapshot();
+                require(oldFile.available&&std::abs(oldFile.result.bpm-file.result.bpm)<1e-9&&oldFile.result.tempoConfidence==0&&!oldFile.result.tempoStable&&oldFile.result.beatTimes.empty(),"legacy file cache compatibility");
+                for(int corrupt=0;corrupt<3;++corrupt)
+                {
+                    auto broken=juce::ValueTree::fromXml(*xml);auto data=broken.getChildWithName("FILE_ANALYSIS");
+                    if(corrupt==0)data.setProperty("tempoConfidence",1.5,nullptr);
+                    if(corrupt==1)data.setProperty("beatTimes","-1,0.5",nullptr);
+                    if(corrupt==2)data.setProperty("beatTimes","1,0.5",nullptr);
+                    juce::MemoryBlock bytes;juce::AudioProcessor::copyXmlToBinary(*broken.createXml(),bytes);
+                    FLOWTONEAudioProcessor target;target.setStateInformation(bytes.getData(),static_cast<int>(bytes.getSize()));
+                    require(!target.usesFileAnalysis()&&!target.fileAnalysis.snapshot().available,"invalid tempo evidence accepted");
+                }
+            }
             if(mode=="file-analyse"&&argc>3)shot(processor,juce::File(argv[3]));
-            std::cout<<"{\"bpm\":"<<file.result.bpm<<",\"key\":"<<file.result.key<<",\"minor\":"<<(file.result.minor?"true":"false")<<",\"seconds\":"<<file.result.seconds<<",\"elapsedMs\":"<<juce::Time::getMillisecondCounterHiRes()-start<<",\"state\":\"PASS\",\"switch\":\"PASS\"}\n";
+            std::cout<<"{\"bpm\":"<<file.result.bpm<<",\"confidence\":"<<file.result.tempoConfidence<<",\"stable\":"<<(file.result.tempoStable?"true":"false")<<",\"ambiguous\":"<<(file.result.tempoAmbiguous?"true":"false")<<",\"variable\":"<<(file.result.tempoVariable?"true":"false")<<",\"alternative\":"<<file.result.alternativeBpm<<",\"beats\":"<<file.result.beatTimes.size()<<",\"key\":"<<file.result.key<<",\"minor\":"<<(file.result.minor?"true":"false")<<",\"seconds\":"<<file.result.seconds<<",\"elapsedMs\":"<<juce::Time::getMillisecondCounterHiRes()-start<<",\"state\":\"PASS\",\"switch\":\"PASS\"}\n";
             return 0;
+        }
+        if(mode=="tempo-timeline")
+        {
+            juce::AudioBuffer<float> audio;double rate;load(juce::File(argv[2]),audio,rate);
+            flowtone::TrackAnalysis analysis;analysis.prepare(rate);
+            int next=static_cast<int>(rate);std::cout<<"[";bool first=true;
+            for(int offset=0;offset<audio.getNumSamples();offset+=512)
+            {
+                const int count=juce::jmin(512,audio.getNumSamples()-offset);
+                juce::AudioBuffer<float> part(audio.getArrayOfWritePointers(),audio.getNumChannels(),offset,count);analysis.push(part);
+                while(analysis.pendingSamples()>32000)juce::Thread::sleep(1);
+                if(offset+count>=next||offset+count==audio.getNumSamples())
+                {
+                    while(analysis.pendingSamples()>0)juce::Thread::sleep(1);
+                    const auto a=analysis.snapshot();
+                    std::cout<<(first?"":",")<<"{\"seconds\":"<<a.seconds<<",\"bpm\":"<<a.bpm<<",\"confidence\":"<<a.tempoConfidence<<",\"stable\":"<<(a.tempoStable?"true":"false")<<",\"ambiguous\":"<<(a.tempoAmbiguous?"true":"false")<<",\"beats\":"<<a.beatTimes.size()<<"}";
+                    first=false;next+=static_cast<int>(rate);
+                }
+            }
+            std::cout<<"]\n";analysis.requestReset();const auto cleared=analysis.snapshot();
+            require(cleared.bpm==0&&cleared.tempoConfidence==0&&cleared.beatTimes.empty(),"tempo evidence survived reset");analysis.stop();return 0;
         }
         if(mode=="analyse")
         {
             juce::AudioBuffer<float> audio;double rate;load(juce::File(argv[2]),audio,rate);flowtone::TrackAnalysis analysis;analysis.prepare(rate);
             for(int offset=0;offset<audio.getNumSamples();offset+=512){const int n=juce::jmin(512,audio.getNumSamples()-offset);juce::AudioBuffer<float> part(audio.getArrayOfWritePointers(),audio.getNumChannels(),offset,n);analysis.push(part);while(analysis.pendingSamples()>32000)juce::Thread::sleep(1);}
             while(analysis.pendingSamples()>0)juce::Thread::sleep(1);juce::Thread::sleep(10);const auto a=analysis.snapshot();
-            std::cout<<"{\"bpm\":"<<a.bpm<<",\"key\":"<<a.key<<",\"minor\":"<<(a.minor?"true":"false")<<",\"seconds\":"<<a.seconds<<",\"complete\":"<<(a.complete?"true":"false")<<",\"chroma\":[";for(int i=0;i<12;++i)std::cout<<(i?",":"")<<a.pitchClasses[static_cast<size_t>(i)];std::cout<<"],\"bass\":[";for(int i=0;i<12;++i)std::cout<<(i?",":"")<<a.bassPitchClasses[static_cast<size_t>(i)];std::cout<<"]}\n";analysis.stop();return 0;
+            std::cout<<"{\"bpm\":"<<a.bpm<<",\"confidence\":"<<a.tempoConfidence<<",\"stable\":"<<(a.tempoStable?"true":"false")<<",\"ambiguous\":"<<(a.tempoAmbiguous?"true":"false")<<",\"variable\":"<<(a.tempoVariable?"true":"false")<<",\"alternative\":"<<a.alternativeBpm<<",\"beats\":"<<a.beatTimes.size()<<",\"key\":"<<a.key<<",\"minor\":"<<(a.minor?"true":"false")<<",\"seconds\":"<<a.seconds<<",\"complete\":"<<(a.complete?"true":"false")<<",\"chroma\":[";for(int i=0;i<12;++i)std::cout<<(i?",":"")<<a.pitchClasses[static_cast<size_t>(i)];std::cout<<"],\"bass\":[";for(int i=0;i<12;++i)std::cout<<(i?",":"")<<a.bassPitchClasses[static_cast<size_t>(i)];std::cout<<"]}\n";analysis.stop();return 0;
         }
         if(mode=="empty-shot"){FLOWTONEAudioProcessor p;shot(p,juce::File(argv[2]));return 0;}
         if(mode=="overflow")

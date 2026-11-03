@@ -132,7 +132,18 @@ void FLOWTONEAudioProcessorEditor::paint(juce::Graphics& graphics)
     juce::Path pulse;pulse.startNewSubPath(48,341);pulse.lineTo(56,341);pulse.lineTo(62,330);pulse.lineTo(68,352);pulse.lineTo(75,323);pulse.lineTo(82,341);pulse.lineTo(90,341);g.setColour(green);g.strokePath(pulse,juce::PathStrokeType(3));
     text(g,ru(u8"ТЕМП"),23,{100,322,200,31},white,true);const double bpm=a.bpm*std::pow(2.0,processor.value("tempoOctave"));
     text(g,bpm>0?decimal(bpm):ru(u8"—"),94,{87,350,300,90},white,true);text(g,"BPM",30,{388,382,95,43},muted);
-    text(g,bpm>0?(file?ru(u8"Определён по файлу целиком"):ru(u8"Определён по входу дорожки")):ru(u8"Нужен ритмичный фрагмент"),16,{91,447,480,25},muted);
+    juce::String tempoStatus=ru(u8"Нужен ритмичный фрагмент");
+    if(bpm>0)
+    {
+        if(a.tempoVariable)tempoStatus=ru(u8"Темп меняется · показан основной");
+        else if(a.tempoConfidence<=0&&file)tempoStatus=ru(u8"Сохранённый результат · можно повторить анализ");
+        else if(!a.tempoStable)tempoStatus=ru(u8"Уточняю темп…");
+        else if(a.tempoAmbiguous)tempoStatus=a.alternativeBpm>0
+            ?ru(u8"Неоднозначно · возможен темп ")+decimal(a.alternativeBpm*std::pow(2.0,processor.value("tempoOctave")))+" BPM"
+            :ru(u8"Неоднозначный ритм · проверьте BPM");
+        else tempoStatus=file?ru(u8"Определён по файлу целиком"):ru(u8"Устойчивый темп по входу дорожки");
+    }
+    text(g,tempoStatus,16,{91,447,480,25},muted);
     note(g,837,326);text(g,ru(u8"ТОНАЛЬНОСТЬ"),23,{891,322,460,32},white,true);
     text(g,a.key>=0?flowtone::TrackAnalysis::keyName(a.key,a.minor):ru(u8"—"),68,{891,351,640,80},white,true);
     g.setColour(a.key>=0?green:edge);g.fillEllipse(896,430,14,14);

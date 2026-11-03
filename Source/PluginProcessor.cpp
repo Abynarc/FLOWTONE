@@ -109,6 +109,13 @@ void FLOWTONEAudioProcessor::getStateInformation(juce::MemoryBlock& block)
         cache.setProperty("available",file.available,nullptr);cache.setProperty("duration",file.duration,nullptr);
         cache.setProperty("rate",file.sampleRate,nullptr);cache.setProperty("channels",file.channels,nullptr);
         cache.setProperty("bpm",file.result.bpm,nullptr);cache.setProperty("key",file.result.key,nullptr);cache.setProperty("minor",file.result.minor,nullptr);
+        cache.setProperty("tempoConfidence",file.result.tempoConfidence,nullptr);
+        cache.setProperty("alternativeBpm",file.result.alternativeBpm,nullptr);
+        cache.setProperty("tempoStable",file.result.tempoStable,nullptr);
+        cache.setProperty("tempoAmbiguous",file.result.tempoAmbiguous,nullptr);
+        cache.setProperty("tempoVariable",file.result.tempoVariable,nullptr);
+        juce::StringArray beats;for(const auto beat:file.result.beatTimes)beats.add(juce::String(beat,8));
+        cache.setProperty("beatTimes",beats.joinIntoString(","),nullptr);
         juce::StringArray peaks;for(const auto peak:file.waveform)peaks.add(juce::String(peak,6));
         cache.setProperty("waveform",peaks.joinIntoString(","),nullptr);state.appendChild(cache,nullptr);
     }
@@ -130,6 +137,20 @@ void FLOWTONEAudioProcessor::setStateInformation(const void* data,int bytes)
         cached.name=cache.getProperty("name").toString().substring(0,1024);cached.path=cache.getProperty("path").toString();
         cached.duration=static_cast<double>(cache.getProperty("duration"));cached.sampleRate=static_cast<double>(cache.getProperty("rate"));cached.channels=static_cast<int>(cache.getProperty("channels"));
         cached.result.bpm=static_cast<double>(cache.getProperty("bpm"));cached.result.key=static_cast<int>(cache.getProperty("key",-1));cached.result.minor=static_cast<bool>(cache.getProperty("minor"));
+        cached.result.tempoConfidence=static_cast<double>(cache.getProperty("tempoConfidence",0.0));
+        cached.result.alternativeBpm=static_cast<double>(cache.getProperty("alternativeBpm",0.0));
+        cached.result.tempoStable=static_cast<bool>(cache.getProperty("tempoStable",false));
+        cached.result.tempoAmbiguous=static_cast<bool>(cache.getProperty("tempoAmbiguous",false));
+        cached.result.tempoVariable=static_cast<bool>(cache.getProperty("tempoVariable",false));
+        if(!std::isfinite(cached.result.tempoConfidence)||cached.result.tempoConfidence<0||cached.result.tempoConfidence>1||!std::isfinite(cached.result.alternativeBpm)||cached.result.alternativeBpm<0||cached.result.alternativeBpm>300)return;
+        const auto beats=juce::StringArray::fromTokens(cache.getProperty("beatTimes").toString(),",","");
+        if(beats.size()>256)return;
+        for(const auto& text:beats)
+        {
+            const auto beat=text.getDoubleValue();
+            if(!std::isfinite(beat)||beat<0||beat>cached.duration||(!cached.result.beatTimes.empty()&&beat<=cached.result.beatTimes.back()))return;
+            cached.result.beatTimes.push_back(beat);
+        }
         if(!std::isfinite(cached.duration)||cached.duration<0||cached.duration>14400||!std::isfinite(cached.sampleRate)||cached.sampleRate<0||cached.sampleRate>384000||!std::isfinite(cached.result.bpm)||cached.result.bpm<0||cached.result.bpm>300||cached.result.key<-1||cached.result.key>11||cached.channels<0||cached.channels>2)return;
         const auto peaks=juce::StringArray::fromTokens(cache.getProperty("waveform").toString(),",","");
         if(peaks.size()!=512)return;

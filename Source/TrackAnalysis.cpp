@@ -1,4 +1,5 @@
 #include "TrackAnalysis.h"
+#include "TempoTracker.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -44,7 +45,12 @@ struct TrackAnalysis::Impl
     std::array<float, fluxSize*2> fluxWork {};
     std::array<float, fluxSize/2+1> previous {};
     std::array<double, 12> chroma {}, bassChroma {};
-    std::vector<double> onsets, bassOnsets;
+    TempoTracker tempoTracker;
+    double previousRms = 0;
+    TempoEstimate stableTempo;
+    struct Observation { double seconds; TempoEstimate tempo; };
+    std::vector<Observation> tempoHistory;
+    double lastTempoSupport = 0;
     int cursor = 0, untilHop = hop;
     uint64_t total = 0, lastPublished = 0;
     int tonalFrames = 0;
@@ -55,11 +61,11 @@ struct TrackAnalysis::Impl
     {
         for (int n = 0; n < keySize; ++n) window[static_cast<size_t>(n)] = static_cast<float>(0.5 - 0.5*std::cos(2*pi*n/(keySize-1)));
         for (int n = 0; n < fluxSize; ++n) fluxWindow[static_cast<size_t>(n)] = static_cast<float>(0.5 - 0.5*std::cos(2*pi*n/(fluxSize-1)));
-        onsets.reserve(6000);bassOnsets.reserve(6000);
+        tempoTracker.reset(rate/hop);tempoHistory.reserve(10);
     }
     void clearAnalysis()
     {
-        samples.fill(0); previous.fill(0); chroma.fill(0); bassChroma.fill(0); onsets.clear();bassOnsets.clear();
+        samples.fill(0); previous.fill(0); chroma.fill(0); bassChroma.fill(0); tempoTracker.reset(rate/hop);previousRms=0;stableTempo={};tempoHistory.clear();lastTempoSupport=0;
         cursor = 0; untilHop = hop; total = 0; lastPublished = 0; tonalFrames = 0; signalEnergy = 0;
         const std::lock_guard<std::mutex> lock(mutex); result = {};
     }
@@ -68,18 +74,21 @@ struct TrackAnalysis::Impl
         for (int n = 0; n < fluxSize; ++n)
             fluxWork[static_cast<size_t>(n)] = samples[static_cast<size_t>((cursor + keySize - fluxSize + n) % keySize)] * fluxWindow[static_cast<size_t>(n)];
         fluxFft.performFrequencyOnlyForwardTransform(fluxWork.data());
-        double novelty = 0, bassNovelty = 0;
+        TempoTracker::Features novelty {};
+        double rms = 0;
         for (int b = 3; b < fluxSize/2; ++b)
         {
             const auto value = std::log1p(20.0f*fluxWork[static_cast<size_t>(b)]);
             const auto difference = juce::jmax(0.0f, value - previous[static_cast<size_t>(b)]);
-            novelty += difference;
-            if(b<=20)bassNovelty+=difference;
+            novelty[0] += difference;
+            novelty[b<=20?1u:b<128?2u:3u] += difference;
+            rms += fluxWork[static_cast<size_t>(b)]*fluxWork[static_cast<size_t>(b)];
             previous[static_cast<size_t>(b)] = value;
         }
-        if (onsets.size() >= 6000) {onsets.erase(onsets.begin(), onsets.begin() + 1000);bassOnsets.erase(bassOnsets.begin(),bassOnsets.begin()+1000);}
-        onsets.push_back(novelty);bassOnsets.push_back(bassNovelty);
-        if (total < keySize || (onsets.size() % 4) != 0) return;
+        const auto logRms=std::log1p(rms);
+        novelty[4]=std::max(0.0,logRms-previousRms);previousRms=logRms;
+        tempoTracker.push(novelty);
+        if (total < keySize || ((total/hop) % 4) != 0) return;
         for (int n = 0; n < keySize; ++n)
             keyWork[static_cast<size_t>(n)] = samples[static_cast<size_t>((cursor + n) % keySize)] * window[static_cast<size_t>(n)];
         keyFft.performFrequencyOnlyForwardTransform(keyWork.data());
@@ -116,86 +125,67 @@ struct TrackAnalysis::Impl
         for (size_t pc = 0; pc < 12; ++pc) { chroma[pc] += frame[pc]/weight; bassChroma[pc] += bass[pc]/weight; }
         ++tonalFrames;
     }
-    double tempo() const
+    TempoEstimate tempo() const { return tempoTracker.estimate(offline); }
+    TempoEstimate liveTempo()
     {
-        if (onsets.size() < static_cast<size_t>(rate/hop*(offline ? 4 : 8))) return 0;
-        const int n = juce::jmin(static_cast<int>(onsets.size()), static_cast<int>(rate/hop*24));
-        const int offset = static_cast<int>(onsets.size()) - n;
-        std::vector<double> values(static_cast<size_t>(n));
-        std::vector<double> bassValues(static_cast<size_t>(n));
-        double energy = 0, bassEnergy = 0;
-        for (int i = 0; i < n; ++i)
+        auto current=tempo();const double seconds=static_cast<double>(total)/rate;
+        tempoHistory.push_back({seconds,current});
+        tempoHistory.erase(std::remove_if(tempoHistory.begin(),tempoHistory.end(),[&](const auto& v){return seconds-v.seconds>5;}),tempoHistory.end());
+        if(current.bpm<=0)
         {
-            double mean = 0, bassMean = 0; int count = 0;
-            for (int j = juce::jmax(0, i-8); j <= juce::jmin(n-1, i+8); ++j) { mean += onsets[static_cast<size_t>(offset+j)];bassMean+=bassOnsets[static_cast<size_t>(offset+j)]; ++count; }
-            const double value = juce::jmax(0.0, onsets[static_cast<size_t>(offset+i)] - mean/count);
-            const double bass = juce::jmax(0.0, bassOnsets[static_cast<size_t>(offset+i)]-bassMean/count);
-            values[static_cast<size_t>(i)] = value; energy += value*value;
-            bassValues[static_cast<size_t>(i)]=bass;bassEnergy+=bass*bass;
+            if(seconds-lastTempoSupport>2.5)stableTempo={};
+            auto held=stableTempo;held.confidence*=0.65;held.ambiguous=true;return held;
         }
-        if (energy < 1e-6) return 0;
-        if(bassEnergy>1e-8)for(int i=0;i<n;++i)values[static_cast<size_t>(i)]=0.35*values[static_cast<size_t>(i)]/std::sqrt(energy/n)+0.65*bassValues[static_cast<size_t>(i)]/std::sqrt(bassEnergy/n);
-        const int first = static_cast<int>(60*rate/(hop*240)), last = static_cast<int>(60*rate/(hop*45));
-        std::vector<double> scores(static_cast<size_t>(last*3+3));
-        for (int lag = first; lag <= last*3 && lag < n/2; ++lag)
+        int support=0;
+        for(const auto& vote:tempoHistory)
+            if(vote.tempo.bpm>0&&TempoTracker::octaveDistance(vote.tempo.bpm,current.bpm)<0.025)++support;
+        if(support<2&&!offline)
         {
-            double product = 0, e1 = 0, e2 = 0, sumA = 0, sumB = 0;
-            for (int i = lag; i < n; ++i)
-            { const auto a = values[static_cast<size_t>(i)], b = values[static_cast<size_t>(i-lag)]; product += a*b; e1 += a*a; e2 += b*b;sumA+=a;sumB+=b; }
-            const double count=n-lag;product-=sumA*sumB/count;e1-=sumA*sumA/count;e2-=sumB*sumB/count;
-            scores[static_cast<size_t>(lag)] = e1*e2 > 1e-12 ? product/std::sqrt(e1*e2) : 0;
+            auto pending=current;pending.confidence*=0.65;pending.ambiguous=true;return pending;
         }
-        int best = -1; double bestScore = 0;
-        for (int lag = first+1; lag < last; ++lag)
+        if(stableTempo.bpm>0&&TempoTracker::octaveDistance(stableTempo.bpm,current.bpm)<0.025)
         {
-            const double value = scores[static_cast<size_t>(lag)];
-            if (value < 0.2 || value < scores[static_cast<size_t>(lag-1)] || value < scores[static_cast<size_t>(lag+1)]) continue;
-            const double bpm = 60*rate/(hop*lag);
-            const double prior = 0.92 + 0.08*std::exp(-0.5*std::pow(std::log2(bpm/120.0)/0.7, 2));
-            const double combined = (value + 0.45*scores[static_cast<size_t>(lag*2)] + 0.2*scores[static_cast<size_t>(lag*3)]) * prior;
-            if (combined > bestScore) { bestScore = combined; best = lag; }
-        }
-        if (best < 0 || bestScore < 0.38) return 0;
-        // Prefer the shorter pulse when its correlation is still strong. This
-        // prevents alternating snare accents from forcing every track to half time.
-        while(best/2>first)
-        {
-            int candidate=best/2;
-            for(int j=juce::jmax(first+1,best/2-1);j<=juce::jmin(last-1,best/2+1);++j)
-                if(scores[static_cast<size_t>(j)]>scores[static_cast<size_t>(candidate)])candidate=j;
-            if(scores[static_cast<size_t>(candidate)]<0.70*scores[static_cast<size_t>(best)]||scores[static_cast<size_t>(candidate)]<0.3)break;
-            best=candidate;
-        }
-        const double a = scores[static_cast<size_t>(best-1)], b = scores[static_cast<size_t>(best)], c = scores[static_cast<size_t>(best+1)];
-        const double den = a-2*b+c;
-        const double lag = best + (std::abs(den) > 1e-9 ? juce::jlimit(-0.5,0.5,0.5*(a-c)/den) : 0.0);
-        const double coarse=60*rate/(hop*lag);
-        // Refine over the full rhythmic window instead of rounding to a hop.
-        double refined=coarse,bestPower=-1;
-        for(int step=-60;step<=60;++step)
-        {
-            const double candidate=coarse+step*0.025;
-            if(candidate<45||candidate>240)continue;
-            const double angle=2*pi*candidate*hop/(60*rate),cr=std::cos(angle),ci=std::sin(angle);
-            double real=0,imag=0,phaseR=1,phaseI=0;
-            for(int i=0;i<n;++i)
+            const int octave=static_cast<int>(std::round(std::log2(stableTempo.bpm/current.bpm)));
+            if(octave==1)
             {
-                const double sample=values[static_cast<size_t>(i)]*(0.5-0.5*std::cos(2*pi*i/(n-1)));
-                real+=sample*phaseR;imag+=sample*phaseI;
-                const double next=phaseR*cr-phaseI*ci;phaseI=phaseI*cr+phaseR*ci;phaseR=next;
+                std::vector<double> beats;
+                for(size_t i=0;i<current.beats.size();++i)
+                {if(i>0)beats.push_back((current.beats[i-1]+current.beats[i])*0.5);beats.push_back(current.beats[i]);}
+                current.beats=std::move(beats);current.bpm*=2;
             }
-            const double power=real*real+imag*imag;
-            if(power>bestPower){bestPower=power;refined=candidate;}
+            else if(octave==-1)
+            {
+                std::vector<double> beats;
+                for(size_t i=0;i<current.beats.size();i+=2)beats.push_back(current.beats[i]);
+                current.beats=std::move(beats);current.bpm*=0.5;
+            }
         }
-        return refined;
+        stableTempo=current;lastTempoSupport=seconds;
+        return current;
     }
     void publish()
     {
         if(workingRevision!=revision.load())return;
         AnalysisSnapshot next;
-        next.seconds = total/rate; next.droppedSamples = dropped.load();
+        next.seconds = static_cast<double>(total)/rate; next.droppedSamples = dropped.load();
         lastPublished = total;
-        next.bpm = tempo();next.pitchClasses=chroma;next.bassPitchClasses=bassChroma;
+        const auto estimate=offline?tempo():liveTempo();
+        next.bpm=estimate.bpm;next.tempoConfidence=estimate.confidence;
+        next.alternativeBpm=estimate.alternative;next.tempoAmbiguous=estimate.ambiguous;
+        next.tempoStable=estimate.bpm>0&&estimate.confidence>=0.65;
+        next.beatTimes=estimate.beats;
+        if(!offline&&estimate.bpm>0)
+        {
+            for(const auto& candidate:tempoHistory)
+            {
+                if(candidate.tempo.confidence<0.65||TempoTracker::octaveDistance(candidate.tempo.bpm,estimate.bpm)<0.06)continue;
+                int support=0;
+                for(const auto& vote:tempoHistory)
+                    if(vote.tempo.confidence>=0.65&&TempoTracker::octaveDistance(vote.tempo.bpm,candidate.tempo.bpm)<0.025)++support;
+                if(support>=2){next.tempoVariable=true;next.tempoAmbiguous=true;next.tempoStable=false;break;}
+            }
+        }
+        next.pitchClasses=chroma;next.bassPitchClasses=bassChroma;
         if (next.seconds >= (offline ? 4 : 12) && tonalFrames >= 30)
         {
             static constexpr double major[] = {6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88};
@@ -220,7 +210,7 @@ struct TrackAnalysis::Impl
             if (active >= 4 && sorted[0] >= 0.70 && sorted[0]-sorted[1] >= 0.05)
             { next.key = best%12; next.minor = best>=12; }
         }
-        next.complete = next.seconds >= 18 && next.bpm > 0 && next.key >= 0;
+        next.complete = next.seconds >= 18 && next.tempoStable && next.key >= 0;
         const std::lock_guard<std::mutex> lock(mutex);if(workingRevision==revision.load())result = next;
     }
     void run()
@@ -262,10 +252,10 @@ AnalysisSnapshot TrackAnalysis::analyseFile(juce::AudioFormatReader& reader, std
 {
     auto storage=std::make_unique<Impl>();
     auto& p=*storage;
-    p.offline=true;p.sourceRate=reader.sampleRate;p.rate=juce::jmin(12000.0,p.sourceRate);
+    p.offline=true;p.sourceRate=reader.sampleRate;p.rate=juce::jmin(12000.0,p.sourceRate);p.tempoTracker.reset(p.rate/hop);
     const double alpha=1-std::exp(-2*pi*juce::jmin(3000.0,p.sourceRate*0.3)/p.sourceRate);
     juce::AudioBuffer<float> block(static_cast<int>(reader.numChannels),4096);
-    std::vector<double> tempos;
+    std::vector<TempoEstimate> tempos;
     uint64_t nextVote=static_cast<uint64_t>(p.rate*12);
     uint64_t lastVote=0;
     waveform.fill(0);
@@ -291,7 +281,7 @@ AnalysisSnapshot TrackAnalysis::analyseFile(juce::AudioFormatReader& reader, std
             if(--p.untilHop==0){p.analyseFrame();p.untilHop=hop;}
             if(p.total>=nextVote)
             {
-                const auto bpm=p.tempo();if(bpm>0)tempos.push_back(bpm);
+                auto vote=p.tempo();if(vote.bpm>0)tempos.push_back(std::move(vote));
                 lastVote=p.total;
                 nextVote+=static_cast<uint64_t>(p.rate*12);
                 if(!progress(static_cast<double>(offset+i)/static_cast<double>(reader.lengthInSamples)))return {};
@@ -299,20 +289,34 @@ AnalysisSnapshot TrackAnalysis::analyseFile(juce::AudioFormatReader& reader, std
         }
     }
     p.publish();auto result=p.result;
-    if(result.bpm>0&&(tempos.empty()||p.total-lastVote>=static_cast<uint64_t>(p.rate*4)))tempos.push_back(result.bpm);
-    // Retain evidence from the whole file: later quiet sections cannot discard
-    // tempo estimates from the beginning. Compare absolute pulse levels first.
+    if(result.bpm>0&&(tempos.empty()||p.total-lastVote>=static_cast<uint64_t>(p.rate*4)))tempos.push_back(p.tempo());
+    // Merge confidence-weighted evidence from the entire file. Equivalent
+    // half/double pulse levels agree; unrelated tempi remain separate clusters.
     if(!tempos.empty())
     {
-        std::vector<double> strongest;
-        for(const auto candidate:tempos)
+        const TempoEstimate* winner=nullptr;double bestWeight=0,totalWeight=0;
+        for(const auto& vote:tempos)totalWeight+=vote.confidence;
+        for(const auto& candidate:tempos)
         {
-            std::vector<double> group;
-            for(const auto bpm:tempos)if(std::abs(std::log2(bpm/candidate))<0.04)group.push_back(bpm);
-            if(group.size()>strongest.size())strongest=std::move(group);
+            double weight=0;
+            for(const auto& vote:tempos)if(TempoTracker::octaveDistance(vote.bpm,candidate.bpm)<0.025)weight+=vote.confidence;
+            if(weight>bestWeight+1e-9||(std::abs(weight-bestWeight)<1e-9&&winner!=nullptr&&candidate.beats.size()>winner->beats.size()))
+            {bestWeight=weight;winner=&candidate;}
         }
-        std::sort(strongest.begin(),strongest.end());
-        result.bpm=strongest[strongest.size()/2];
+        std::vector<std::pair<double,double>> group;
+        for(const auto& vote:tempos)
+            if(TempoTracker::octaveDistance(vote.bpm,winner->bpm)<0.025)
+            {
+                const double aligned=vote.bpm*std::pow(2.0,std::round(std::log2(winner->bpm/vote.bpm)));
+                group.emplace_back(aligned,vote.confidence);
+            }
+        std::sort(group.begin(),group.end());double accumulated=0;
+        for(const auto& vote:group){accumulated+=vote.second;if(accumulated>=bestWeight*0.5){result.bpm=vote.first;break;}}
+        result.tempoConfidence=winner->confidence*bestWeight/totalWeight;
+        result.tempoVariable=tempos.size()>=3&&bestWeight<totalWeight*0.75;
+        result.tempoAmbiguous=winner->ambiguous||result.tempoVariable;
+        result.tempoStable=result.tempoConfidence>=0.65&&!result.tempoVariable;
+        result.alternativeBpm=winner->alternative;result.beatTimes=winner->beats;
     }
     result.seconds=static_cast<double>(reader.lengthInSamples)/reader.sampleRate;
     result.complete=true;
